@@ -25,8 +25,8 @@ import {
   unlockAchievementsHoneygain,
   verifyEmail
 } from '~/utils/utlis'
-import { getProfles } from './api/gologin'
-import adb from './services/appium-adb'
+import { getProfles } from '../api/gologin'
+import adb from '../services/appium-adb'
 
 const profiles: any[] = []
 let currentProfileIndex = 0
@@ -67,7 +67,6 @@ async function runProfileExtra(profileId: string) {
     idJumpExtra = await getIdJump(accessTokenJumpExtra || '')
     console.log('Profile extra idJump:', idJumpExtra)
     await loginTwitterOnJumptask(browser)
-    await sleep(3000)
     await enterBonusCodeJumptask(accessTokenJumpExtra as string)
     await sleep(2000)
     postIdsExtra = await getAllPostFollowId(accessTokenJumpExtra || '')
@@ -166,7 +165,7 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       confirm(confirmEmailLink)
       await sleep(5000)
       if (idJump) {
-        await addIdJump(accessTokenHoneygain, idJump, confirmEmailLink)
+        await addIdJump(accessTokenHoneygain, idJump)
         const otp = await getCodeEmail(email)
         if (otp) {
           await confirmWithOTP(accessTokenHoneygain, otp)
@@ -179,10 +178,6 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       await sleep(2000)
       await unlockAchievementsHoneygain(accessTokenHoneygain)
       await sleep(2000)
-      while (isAddIdJumpMainActive) {
-        await sleep(5000)
-      }
-      isAddIdJumpMainActive = true
       for (const id of postIds) {
         await followXJumptask(accessTokenJump || '', idJump || '', id)
         await sleep(2000)
@@ -195,6 +190,10 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
         await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
         await sleep(3000)
       }
+      while (isAddIdJumpMainActive) {
+        await sleep(5000)
+      }
+      isAddIdJumpMainActive = true
       await addIdJump(accessTokenHoneygain, idMain)
       isAddIdJumpMainActive = false
       await sleep(5000)
@@ -203,17 +202,7 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
         const { jumpTaskGainerId, jumpTaskProId } = achievementIds
         await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskGainerId || '')
         await sleep(1000)
-        const code = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
-        if (code == 400) {
-          const postIdExtra = postIdsExtra.shift()
-          if (postIdExtra) {
-            await addIdJump(accessTokenHoneygain, idJumpExtra)
-            await sleep(2000)
-            console.log(`Using profile extra idJump ${idJumpExtra}`)
-            await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
-            await sleep(3000)
-          }
-        }
+        await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
       } else {
         console.error('Failed to get achievement IDs for JumpTask')
       }
@@ -237,7 +226,7 @@ async function initializeProfiles() {
     console.log('No profiles available')
     return
   }
-  const sortedProfiles = result.data.profiles.sort((a, b) => a.name.localeCompare(b.name))
+  const sortedProfiles = result.data.profiles.sort((a: any, b: any) => a.name.localeCompare(b.name))
   profiles.push(...sortedProfiles)
 }
 
@@ -277,20 +266,8 @@ async function processProfile(profile: any, proxy: any) {
     await runProfileExtra(profile.id)
     currentProfileIndex = (currentProfileIndex + 1) % profiles.length
   } else {
-    currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-    const profile2 = profiles[currentProfileIndex]
-    const proxy2 = activeProxies[currentProxyIndex]
-    const agent2 = new HttpsProxyAgent(`http://${proxy2.username}:${proxy2.password}@${proxy2.host}:${proxy2.port}`)
-    const axiosInstance2 = axios.create({
-      httpAgent: agent2,
-      httpsAgent: agent2
-    })
-    await Promise.all([
-      runProfile(profile.id, axiosInstance, accessTokenJumpExtra, idJumpExtra),
-      runProfile(profile2.id, axiosInstance2, accessTokenJumpExtra, idJumpExtra)
-    ])
-
-    currentProfileIndex = (currentProfileIndex + 1) % profiles.length
+    await runProfile(profile.id, axiosInstance, accessTokenJumpExtra, idJumpExtra),
+      (currentProfileIndex = (currentProfileIndex + 1) % profiles.length)
     currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
   }
 }

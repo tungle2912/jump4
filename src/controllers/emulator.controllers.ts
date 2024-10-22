@@ -71,7 +71,7 @@ class EmulatorController {
 
       await exec(`input swipe 270 500 270 800`)
       console.log('Scrolled down')
-      await sleep(2000)
+      await sleep(1000)
 
       await sleep(3000)
       await exec(`input tap 300 425`)
@@ -94,7 +94,7 @@ class EmulatorController {
       await exec(`input tap 250 500`)
       console.log('Login successful')
 
-      // await sleep(3000)
+      await sleep(3000)
       // exec('input keyevent 3')
 
       await this.logoutHoneygain({
@@ -110,11 +110,11 @@ class EmulatorController {
     // // Nhấn vào nút "More"
     // await exec(`input tap 500 900`)
     // console.log('More button clicked'))
-    await sleep(5000)
+    await sleep(7000)
     // Cuộn xuống dưới cùng
     await exec(`input swipe 270 800 270 200`)
     console.log('Scrolled down')
-    await sleep(4000)
+    await sleep(2000)
     // Nhấn vào nút "Logout"
     await exec(`input tap 300 825`)
     console.log('Logout successful')
