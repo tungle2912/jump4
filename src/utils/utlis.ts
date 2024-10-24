@@ -42,7 +42,7 @@ export const clickWithRetry = async (page: Page, selector: string, retries = 3) 
 export const loginJumptask = async (browser: Browser, jumptask: Page) => {
   try {
     await sleep(5000)
-    await jumptask.waitForSelector('button[type="button"]>p.MuiTypography-body1', { visible: true, timeout: 60000 })
+    await jumptask.waitForSelector('button[type="button"]>p.MuiTypography-body1', { timeout: 60000 })
     const element = await jumptask.$('button[type="button"]>p.MuiTypography-body1')
     if (element) {
       await jumptask.click('button[type="button"]>p.MuiTypography-body1')
@@ -128,6 +128,7 @@ export const checkLinkTwitter = async (accessToken: string, userId: string) => {
         Authorization: `Bearer ${accessToken}`
       }
     })
+    console.log('link twitter response:', response.data.data)
     const twitterAccounts = response.data.data
     return twitterAccounts != null && twitterAccounts.length > 0
   } catch (error) {
@@ -175,6 +176,7 @@ export const loginTwitterOnJumptask = async (browser: Browser) => {
       console.log('link thành công')
     } else {
       await sleep(1000)
+      await linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]')
       await linkTwitterPage.click('div[data-testid="google_sign_in_container"]')
       console.log('clicked')
       const newPagePromise = new Promise<Page>((resolve, reject) => {
@@ -193,24 +195,33 @@ export const loginTwitterOnJumptask = async (browser: Browser) => {
       })
       try {
         const newPage = await newPagePromise
-        await sleep(5000)
-        await newPage.waitForSelector('.VV3oRb.YZVTmd', { visible: true })
-        await newPage.click('.VV3oRb.YZVTmd')
-        await sleep(2000)
-        // } else {
-        //   const profile = profiles.find((p) => p.name === profileName)
-        //   if (!profile) {
-        //     console.log(`Profile with name ${profileName} not found`)
-        //     return
-        //   }
-        //   await newPage.waitForSelector('#identifierId', { visible: true, timeout: 60000 })
-        //   await sleep(1000)
-        //   await newPage.type('#identifierId', profile.email, { delay: 10 })
-        //   await newPage.click('#identifierNext')
-        //   await newPage.waitForSelector('input[name="Passwd"]', { visible: true, timeout: 60000 })
-        //   await newPage.type('input[name="Passwd"]', profile.password, { delay: 10 })
-        //   await newPage.keyboard.press('Enter')
-        // }
+        let newPageReady = await isPageReady(newPage)
+        let retries = 0
+        const maxRetries = 3
+        while (!newPageReady && retries < maxRetries) {
+          console.log('Trang mới chưa tải xong, tải lại...')
+          await newPage.reload()
+          await sleep(3000)
+          newPageReady = await isPageReady(newPage)
+          retries++
+        }
+
+        if (!newPageReady) {
+          console.log('Trang mới vẫn chưa sẵn sàng sau các lần thử')
+          return
+        }
+        await newPage.waitForSelector('.yAlK0b')
+        const element1 = await newPage.$('.yAlK0b')
+        if (element1) {
+          await newPage.click('.yAlK0b')
+        }
+        await new Promise<void>((resolve) => {
+          newPage.once('close', () => {
+            console.log('Trang mới đã đóng')
+            resolve()
+          })
+        })
+        console.log('link thành công')
       } catch (err) {
         console.log('Đã xảy ra lỗi trong quá trình đăng nhập Twitter')
       }
@@ -247,23 +258,7 @@ export const linkTwitterOnJumptask = async (browser: Browser) => {
     console.log('Error in linkTwitterOnJumptask:', error)
   }
 }
-export async function getEmails(login: any, domain: any) {
-  try {
-    const response = await axios.get(
-      `https://www.1secmail.com/api/v1/?action=getMessages&login=${login}&domain=${domain}`
-    )
-    const emails = response.data
-    return emails
-  } catch (error: any) {
-    console.error('Error fetching emails:', error.response ? error.response.data : error.message)
-  }
-}
-export async function findEmailBySubject(emails: any, subjectToFind: any) {
-  return emails.find((email: any) => email.subject === subjectToFind)
-}
-export async function findEmailByVerificationCodeSubject(emails: any, subjectToFind: any) {
-  return emails.find((email: any) => email.subject === subjectToFind)
-}
+
 export async function getAchievementIdsForJumpTask(
   accesstoken: string,
   retries = 3
@@ -311,7 +306,10 @@ export async function getAllPostFollowId(accessToken: string): Promise<string[]>
       })
       const filteredOffers = response.data.data.offers
         .filter(
-          (offer: any) => offer.title.toLowerCase().includes('follow') || offer.title.toLowerCase().includes('like')
+          (offer: any) =>
+            offer.title.toLowerCase().includes('follow') ||
+            offer.title.toLowerCase().includes('like') ||
+            offer.title.toLowerCase().includes('repost')
         )
         .map((offer: any) => offer.offer_id)
 
@@ -331,23 +329,22 @@ export async function getAllPostFollowId(accessToken: string): Promise<string[]>
 
   return fetchOffers() // Call the function with the default retry count
 }
-export async function getEmailDetailsAndFirstHref(login: any, domain: any, emailId: any) {
+export async function getEmailDetailsAndFirstHref(token: string, emailId: string) {
   try {
-    const response = await axios.get(
-      `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${emailId}`
-    )
-    const emailDetails = response.data
+    const response = await axios.get(`https://api.mail.tm/messages/${emailId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
 
-    // Kiểm tra nếu body tồn tại
-    if (!emailDetails.body) {
+    const emailBody = response.data.text
+
+    if (!emailBody) {
       console.error('Email body is undefined.')
       return null
     }
 
-    const htmlBody = emailDetails.body
-
-    // Sử dụng Regular Expression để tìm href đầu tiên
-    const hrefMatch = htmlBody.match(/href="([^"]+)"/)
+    const hrefMatch = emailBody.match(/Confirm email\s*\( (https?:\/\/[^\s]+) \)/i)
 
     if (hrefMatch && hrefMatch[1]) {
       const firstHref = hrefMatch[1]
@@ -360,62 +357,147 @@ export async function getEmailDetailsAndFirstHref(login: any, domain: any, email
     console.error('Error fetching email details:', error.response ? error.response.data : error.message)
   }
 }
-export async function callLink(url: string) {
+export async function getOTPFromEmailDetails(token: string, emailId: string) {
   try {
-    await fetch(url)
-    console.log('Link accessed successfully:')
-  } catch (error: any) {
-    console.error('Error accessing link:', error.response ? error.response.data : error.message)
-  }
-}
-export async function getOTPFromEmailDetails(login: any, domain: any, emailId: any) {
-  try {
-    const response = await axios.get(
-      `https://www.1secmail.com/api/v1/?action=readMessage&login=${login}&domain=${domain}&id=${emailId}`
-    )
-    const emailDetails = response.data
-
-    // Kiểm tra nếu body tồn tại
-    if (!emailDetails.body) {
+    const response = await axios.get(`https://api.mail.tm/messages/${emailId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+    const emailDetails = response.data.text
+    if (!emailDetails) {
       console.error('Email body is undefined.')
       return null
     }
 
-    const htmlBody = emailDetails.body
+    const codeMatch = emailDetails.match(/(\d{6})/)
 
-    // Sử dụng Regular Expression để tìm mã OTP (6 chữ số)
-    const otpMatch = htmlBody.match(/<h2[^>]*>(\d{6})<\/h2>/)
-
-    if (otpMatch && otpMatch[1]) {
-      const otp = otpMatch[1]
-      return otp
+    if (codeMatch && codeMatch[1]) {
+      const verificationCode = codeMatch[1]
+      return verificationCode // Return the found code
     } else {
-      console.log('No OTP found.')
+      console.log('No verification code found.')
       return null
     }
   } catch (error: any) {
     console.error('Error fetching email details:', error.response ? error.response.data : error.message)
   }
 }
+export async function getEmails(token: string) {
+  try {
+    const response = await axios.get('https://api.mail.tm/messages', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+    const emails = response.data['hydra:member']
+    return emails
+  } catch (error: any) {
+    console.error('Error fetching emails:', error.response ? error.response.data : error.message)
+  }
+}
+export async function findEmailBySubject(emails: any, subjectToFind: any) {
+  return emails.find((email: any) => email.subject === subjectToFind)
+}
+export async function findEmailByVerificationCodeSubject(emails: any, subjectToFind: any) {
+  return emails.find((email: any) => email.subject === subjectToFind)
+}
 export async function createRandomEmail(maxRetries: number = 3) {
   let retryCount = 0
+  const password = 'Tungle'
 
   while (retryCount < maxRetries) {
     try {
-      const response = await axios.get('https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1')
-      const email = response.data[0]
-      console.log(`Email created: ${email}`)
-      return email // Trả về email nếu thành công
+      const response = await axios.get('https://api.mail.tm/domains')
+      const domain = response.data['hydra:member'][0].domain // Get the first available domain
+      const randomEmail = `${Math.random().toString(36).substring(7)}@${domain}`
+
+      // Create the account with the random email
+      await axios.post('https://api.mail.tm/accounts', {
+        address: randomEmail,
+        password: password
+      })
+
+      console.log(`Email created: ${randomEmail}`)
+      return { email: randomEmail, password }
     } catch (error: any) {
       retryCount++
-      console.error(
-        `Error creating email (Attempt ${retryCount}/${maxRetries}):`,
-        error.response ? error.response.data : error.message
-      )
+      console.error(`Error creating email (Attempt ${retryCount}/${maxRetries}):`, error.message)
       if (retryCount >= maxRetries) {
         throw new Error('Max retry attempts reached. Unable to create random email.')
       }
     }
+  }
+}
+export async function loginMail(email: string, password: string) {
+  try {
+    const response = await axios.post('https://api.mail.tm/token', {
+      address: email,
+      password: password
+    })
+    const token = response.data.token
+    console.log('Token received:', token)
+    return token
+  } catch (error: any) {
+    console.error('Error logging in:', error.response ? error.response.data : error.message)
+  }
+}
+export async function verifyEmail(token: string) {
+  const subjectToFind = 'Verify your email address 📬'
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const emails = await getEmails(token)
+
+    if (emails && emails.length > 0) {
+      const emailToVerify = await findEmailBySubject(emails, subjectToFind)
+
+      if (emailToVerify) {
+        console.log(`Found email with subject "${subjectToFind}".`)
+        const emailId = emailToVerify.id
+
+        const firstHref = await getEmailDetailsAndFirstHref(token, emailId)
+        if (firstHref) {
+          return firstHref
+        }
+      } else {
+        console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
+      }
+    } else {
+      console.log('No emails received yet, retrying...')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000))
+  }
+}
+export async function getCodeEmail(token: string): Promise<string | null> {
+  const subjectToFind = 'Verification Code 🔑 | Honeygain'
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const emails = await getEmails(token)
+
+    if (emails && emails.length > 0) {
+      const emailToVerify = await findEmailBySubject(emails, subjectToFind)
+
+      if (emailToVerify) {
+        console.log(`Found email with subject "${subjectToFind}".`)
+        const emailId = emailToVerify.id
+
+        const otp = await getOTPFromEmailDetails(token, emailId)
+        if (otp) {
+          console.log('OTP:', otp)
+          return otp
+        }
+      } else {
+        console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
+      }
+    } else {
+      console.log('No emails received yet, retrying...')
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5000))
   }
 }
 export async function registerHoneygain(email: string, axiosInstance: any): Promise<string | null> {
@@ -486,107 +568,6 @@ export async function registerHoneygain(email: string, axiosInstance: any): Prom
 
   return accessToken // Return the access token if successful, otherwise null
 }
-export async function confirmUserRegistration(accessToken: string, maxRetries: number = 3) {
-  let retryCount = 0
-
-  while (retryCount < maxRetries) {
-    try {
-      const response = await axios.post(
-        'https://dashboard.honeygain.com/api/v1/users/confirmation_tokens',
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      )
-      console.log('User confirmation triggered:', response.data)
-      return response.data // Trả về kết quả nếu thành công
-    } catch (error: any) {
-      retryCount++
-      console.error(
-        `Error confirming user (Attempt ${retryCount}/${maxRetries}):`,
-        error.response ? error.response.data : error.message
-      )
-      await sleep(3000)
-      // Nếu đạt số lần thử tối đa, báo lỗi và dừng lại
-      if (retryCount >= maxRetries) {
-        throw new Error('Max retry attempts reached. Unable to confirm user registration.')
-      }
-    }
-  }
-}
-export async function verifyEmail(email: string) {
-  const subjectToFind = 'Verify your email address 📬'
-  const [login, domain] = email.split('@')
-
-  await new Promise((resolve) => setTimeout(resolve, 3000))
-
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    // Lấy danh sách email
-    const emails = await getEmails(login, domain)
-
-    if (emails && emails.length > 0) {
-      // Tìm email có subject cụ thể
-      const emailToVerify = await findEmailBySubject(emails, subjectToFind)
-
-      if (emailToVerify) {
-        console.log(`Found email with subject "${subjectToFind}".`)
-        const emailId = emailToVerify.id
-
-        // Lấy chi tiết email và tìm link đầu tiên
-        const firstHref = await getEmailDetailsAndFirstHref(login, domain, emailId)
-        if (firstHref) {
-          console.log('First href:', firstHref)
-          return firstHref
-        }
-      } else {
-        console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
-      }
-    } else {
-      console.log('No emails received yet, retrying...')
-    }
-
-    // Chờ 5 giây trước khi kiểm tra lại
-    await new Promise((resolve) => setTimeout(resolve, 5000))
-  }
-}
-export async function getCodeEmail(email: string): Promise<string | null> {
-  const subjectToFind = 'Verification Code 🔑 | Honeygain'
-  const [login, domain] = email.split('@')
-  await new Promise((resolve) => setTimeout(resolve, 3000))
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    // Lấy danh sách email
-    const emails = await getEmails(login, domain)
-
-    if (emails && emails.length > 0) {
-      // Tìm email có subject cụ thể
-      const emailToVerify = await findEmailByVerificationCodeSubject(emails, subjectToFind)
-
-      if (emailToVerify) {
-        console.log(`Found email with subject "${subjectToFind}".`)
-        const emailId = emailToVerify.id
-
-        // Lấy mã OTP từ chi tiết email
-        const otp = await getOTPFromEmailDetails(login, domain, emailId)
-        if (otp) {
-          console.log('OTP:', otp)
-          return otp // Trả về mã OTP
-        }
-      } else {
-        console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
-      }
-    } else {
-      console.log('No emails received yet, retrying...')
-    }
-
-    // Chờ một khoảng thời gian ngắn trước khi kiểm tra lại (ví dụ 5 giây)
-    await new Promise((resolve) => setTimeout(resolve, 5000))
-  }
-}
 export async function addIdJump(accessToken: string, jtKey: string, confirmEmailLink?: string) {
   const body = {
     jt_toggle: true,
@@ -606,7 +587,7 @@ export async function addIdJump(accessToken: string, jtKey: string, confirmEmail
 
     if (errorResponse && errorResponse.type === 403 && errorResponse.title === 'user_email_not_confirmed') {
       console.log('User email not confirmed. Retrying...')
-      confirm(confirmEmailLink)
+      await confirm(confirmEmailLink)
       await sleep(3000)
       try {
         // Re-attempt the API call after handling the issue (e.g., waiting for email confirmation)
@@ -692,6 +673,37 @@ export async function unlockAchievementsHoneygain(accessToken: string) {
         await sleep(2000)
       } else {
         console.error('Max retries reached. Aborting unlock.')
+      }
+    }
+  }
+}
+export async function confirmUserRegistration(accessToken: string, maxRetries: number = 3) {
+  let retryCount = 0
+
+  while (retryCount < maxRetries) {
+    try {
+      const response = await axios.post(
+        'https://dashboard.honeygain.com/api/v1/users/confirmation_tokens',
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      console.log('User confirmation triggered:', response.data)
+      return response.data // Trả về kết quả nếu thành công
+    } catch (error: any) {
+      retryCount++
+      console.error(
+        `Error confirming user (Attempt ${retryCount}/${maxRetries}):`,
+        error.response ? error.response.data : error.message
+      )
+      await sleep(3000)
+      // Nếu đạt số lần thử tối đa, báo lỗi và dừng lại
+      if (retryCount >= maxRetries) {
+        throw new Error('Max retry attempts reached. Unable to confirm user registration.')
       }
     }
   }
@@ -806,7 +818,7 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
             'Content-Type': 'application/json'
           }
         })
-        console.log('Account deleted successfully with new proxy:', currentProxy)
+        console.log('Account deleted successfully with new proxy:', currentProxy.host)
         success = true // Nếu thành công, thoát khỏi vòng lặp
       } catch (retryError: any) {
         console.error(

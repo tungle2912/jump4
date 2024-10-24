@@ -20,6 +20,7 @@ import {
   getCodeEmail,
   getIdJump,
   loginJumptask,
+  loginMail,
   loginTwitterOnJumptask,
   registerHoneygain,
   unlockAchievementsHoneygain,
@@ -39,6 +40,7 @@ let axiosExtraInstance: any
 let isFirst: boolean = true
 let isLoginHoneygainActive = false
 let isAddIdJumpMainActive = false
+let coin = 0
 
 async function runProfileExtra(profileId: string) {
   const { launch } = await GoLogin()
@@ -113,7 +115,8 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
     const pages = await browser.pages()
     const jumptask = pages[0]
     await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000
+      timeout: 60000,
+      waitUntil: 'networkidle2'
     })
     await jumptask.bringToFront()
     await loginJumptask(browser, jumptask)
@@ -131,13 +134,21 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       console.log('Access token JumpTask:', accessTokenJump)
       idJump = await getIdJump(accessTokenJump || '')
       console.log('idJump:', idJump)
+      const newPage = await browser.newPage()
+
+      await loginJumptask(browser, newPage)
     }
     await loginTwitterOnJumptask(browser)
     await enterBonusCodeJumptask(accessTokenJump as string)
     await sleep(5000)
     const postIds = await getAllPostFollowId(accessTokenJump || '')
     console.log('postids: ', postIds)
-    const email = await createRandomEmail()
+    const emailData = await createRandomEmail()
+    if (!emailData) {
+      throw new Error('Failed to create random email')
+    }
+    const { email, password } = emailData
+    const tokenMail = await loginMail(email, password)
     const accessTokenHoneygain = await registerHoneygain(email as string, axiosInstance)
     while (isLoginHoneygainActive) {
       await sleep(5000)
@@ -157,17 +168,17 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
     //  const accessTokenHoneygain = await fetchNewAccessToken(email as string, axiosInstance)
     if (accessTokenHoneygain) {
       await confirmUserRegistration(accessTokenHoneygain)
-      const confirmEmailLink = await verifyEmail(email)
+      const confirmEmailLink = await verifyEmail(tokenMail)
       await sleep(2000)
       // if (confirmEmailLink) {
       //   const page = await browser.newPage()
       //   await page.goto(confirmEmailLink)
       // }
-      confirm(confirmEmailLink)
+      await confirm(confirmEmailLink)
       await sleep(5000)
       if (idJump) {
-        await addIdJump(accessTokenHoneygain, idJump, confirmEmailLink)
-        const otp = await getCodeEmail(email)
+        await addIdJump(accessTokenHoneygain, idJump)
+        const otp = await getCodeEmail(tokenMail)
         if (otp) {
           await confirmWithOTP(accessTokenHoneygain, otp)
         }
@@ -179,10 +190,6 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       await sleep(2000)
       await unlockAchievementsHoneygain(accessTokenHoneygain)
       await sleep(2000)
-      while (isAddIdJumpMainActive) {
-        await sleep(5000)
-      }
-      isAddIdJumpMainActive = true
       for (const id of postIds) {
         await followXJumptask(accessTokenJump || '', idJump || '', id)
         await sleep(2000)
@@ -195,25 +202,26 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
         await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
         await sleep(3000)
       }
+      while (isAddIdJumpMainActive) {
+        await sleep(5000)
+      }
+      isAddIdJumpMainActive = true
       await addIdJump(accessTokenHoneygain, idMain)
       isAddIdJumpMainActive = false
       await sleep(5000)
       const achievementIds = await getAchievementIdsForJumpTask(accessTokenHoneygain)
       if (achievementIds) {
         const { jumpTaskGainerId, jumpTaskProId } = achievementIds
-        await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskGainerId || '')
-        await sleep(1000)
-        const code = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
-        if (code == 400) {
-          const postIdExtra = postIdsExtra.shift()
-          if (postIdExtra) {
-            await addIdJump(accessTokenHoneygain, idJumpExtra)
-            await sleep(2000)
-            console.log(`Using profile extra idJump ${idJumpExtra}`)
-            await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
-            await sleep(3000)
-          }
+        const code = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskGainerId || '')
+        if (code == 200) {
+          coin = coin + 0.02
         }
+        await sleep(1000)
+        const code2 = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
+        if (code2 == 200) {
+          coin = coin + 0.056
+        }
+        console.log('Coin:', coin)
       } else {
         console.error('Failed to get achievement IDs for JumpTask')
       }
@@ -257,7 +265,6 @@ async function processProfile(profile: any, proxy: any) {
     httpAgent: agent,
     httpsAgent: agent
   })
-  currentProxyIndex = (currentProxyIndex + 1) % proxies.length
   if (postIdsExtra.length === 0) {
     if (!isFirst) {
       const proxyExtra = activeProxies[currentProxyIndex]

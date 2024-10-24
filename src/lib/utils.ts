@@ -1,6 +1,6 @@
 import { exec } from 'child_process'
 import puppeteer, { Page } from 'puppeteer'
-export const confirm = async (link: string, delay = 1500) => {
+export const confirm = async (link: string, delay = 2000) => {
   try {
     const browser = await puppeteer.launch({
       headless: true

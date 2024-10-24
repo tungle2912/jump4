@@ -1,0 +1,4 @@
+import { getCodeEmail } from '~/utils/utlis'
+const token =
+  'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3Mjk3NTA1MzksInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJhZGRyZXNzIjoicGJ6Z21AbGl2aW5pdGxhcmdlLm5ldCIsImlkIjoiNjcxOWU2MGE3MjdkMDg1ZjVjMDU1MWFhIiwibWVyY3VyZSI6eyJzdWJzY3JpYmUiOlsiL2FjY291bnRzLzY3MTllNjBhNzI3ZDA4NWY1YzA1NTFhYSJdfX0.dvHsMHnh6vGiH2L10KtTTnDBBCwdt-ZB3fo6_Cw-La0VSwuR5L-OyesxU0yOB5vrWAukEOONYs5sw39jYDsfrg'
+getCodeEmail(token)
