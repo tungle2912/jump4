@@ -28,69 +28,18 @@ import {
 } from '~/utils/utlis'
 import { getProfles } from '../api/gologin'
 import adb from '../services/appium-adb'
-
+import { promises } from 'dns'
+const access =
+  'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzY29wZSI6ImNyZWRzIiwic3ViIjoiOWJiNDNhMmUtYmViMC00NDA4LTg3OTgtMWFkZTA5MWJiMmI0IiwiZXhwIjoxNzMyMTA4NDMxLCJpYXQiOjE3Mjk1MTY0MzEsImp0aSI6ImYxYjE5MzE0LTVjYmUtNDAwZC04NWIwLWVhYjBiZWNkMWM0OCJ9.3FS02ptersjyGOJVSh74Vn57PnrVZoin9Ke-tTpZ7pTptKOnbJiY2DZuSaYfEb0eqwEIcnwZjZjLalyFPNpICg'
 const profiles: any[] = []
 let currentProfileIndex = 0
 let currentProxyIndex = 0
 const idMain = 'aacbe798-3eb4-4a94-859a-b7d8d36d07e4'
-let accessTokenJumpExtra: any = ''
-let idJumpExtra: any = ''
-let postIdsExtra: any[] = []
-let axiosExtraInstance: any
-let isExtraSuccess: boolean = false
 let isLoginHoneygainActive = false
 let isAddIdJumpMainActive = false
-let isSuccess = false
+let coin = 0
 
-async function runProfileExtra(profileId: string) {
-  const { launch } = await GoLogin()
-  try {
-    while (!isSuccess) {
-      await sleep(15000)
-    }
-    const { browser: goLoginBrowser } = await launch({
-      profileId: profileId,
-      headless: false
-    })
-    const browser = await connect({
-      browserWSEndpoint: goLoginBrowser?.wsEndpoint(),
-      defaultViewport: null,
-      protocolTimeout: 60000
-    })
-    const pages = await browser.pages()
-    const jumptask = pages[0]
-    await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000,
-      waitUntil: 'networkidle2'
-    })
-    //await jumptask.evaluate(() => window.focus())
-    console.log('profile extra :')
-    await jumptask.bringToFront()
-    await loginJumptask(browser, jumptask)
-    await sleep(5000)
-    const accessToken = await jumptask.evaluate(() => localStorage.getItem('JWT'))
-    console.log('Access token Profile extra:', accessToken)
-    const idJump = await getIdJump(accessTokenJumpExtra || '')
-    console.log('Profile extra idJump:', idJump)
-    await loginTwitterOnJumptask(browser)
-    await enterBonusCodeJumptask(accessTokenJumpExtra as string)
-    await sleep(5000)
-    const postIds = await getAllPostFollowId(accessTokenJumpExtra || '')
-    console.log('postids extra: ', postIds)
-    const isLinkX = await checkLinkTwitter(accessTokenJumpExtra || '', idJumpExtra || '')
-    if (!isLinkX) {
-      await loginTwitterOnJumptask(browser)
-      await sleep(5000)
-    }
-    await browser.close()
-    isExtraSuccess = true
-    return { idJump, accessToken, postIds }
-  } catch (err) {
-    console.error('Error in runProfileForJumpId:', err)
-  }
-}
-
-async function runProfile(profileId: string, axiosInstance: any, accessTokenJumpExtra: any, idJumpExtra: any) {
+async function runProfile5(profileId: string, axiosInstance: any) {
   const { launch } = await GoLogin()
   try {
     const { browser: goLoginBrowser } = await launch({
@@ -119,7 +68,8 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
     const pages = await browser.pages()
     const jumptask = pages[0]
     await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000
+      timeout: 60000,
+      waitUntil: 'networkidle2'
     })
     await jumptask.bringToFront()
     await loginJumptask(browser, jumptask)
@@ -153,13 +103,6 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
     const { email, password } = emailData
     const tokenMail = await loginMail(email, password)
     const accessTokenHoneygain = await registerHoneygain(email as string, axiosInstance)
-    const isLinkX = await checkLinkTwitter(accessTokenJump || '', idJump || '')
-    if (!isLinkX) {
-      await loginTwitterOnJumptask(browser)
-      await sleep(5000)
-    }
-    await browser.close()
-    isSuccess = true
     while (isLoginHoneygainActive) {
       await sleep(5000)
     }
@@ -168,6 +111,12 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       deviceId: await adb.getDeviceId(),
       email: email || ''
     })
+    const isLinkX = await checkLinkTwitter(accessTokenJump || '', idJump || '')
+    if (!isLinkX) {
+      await loginTwitterOnJumptask(browser)
+      await sleep(5000)
+    }
+    await browser.close()
     isLoginHoneygainActive = false
     //  const accessTokenHoneygain = await fetchNewAccessToken(email as string, axiosInstance)
     if (accessTokenHoneygain) {
@@ -198,23 +147,6 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
         await followXJumptask(accessTokenJump || '', idJump || '', id)
         await sleep(2000)
       }
-      // while (!isExtraSuccess) {
-      //   await sleep(5000)
-      // }
-      const postIdExtra = postIdsExtra.shift()
-      if (postIdExtra) {
-        await addIdJump(accessTokenHoneygain, idJumpExtra)
-        await sleep(2000)
-        console.log(`Using profile extra idJump ${idJumpExtra}`)
-        await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
-        const postIdExtra2 = postIdsExtra.shift()
-        await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra2)
-        if (postIdsExtra.length == 1) {
-          const postIdExtra3 = postIdsExtra.shift()
-          await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra3)
-        }
-        await sleep(3000)
-      }
       while (isAddIdJumpMainActive) {
         await sleep(5000)
       }
@@ -225,9 +157,16 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
       const achievementIds = await getAchievementIdsForJumpTask(accessTokenHoneygain)
       if (achievementIds) {
         const { jumpTaskGainerId, jumpTaskProId } = achievementIds
-        await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskGainerId || '')
+        const code = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskGainerId || '')
+        if (code == 200) {
+          coin = coin + 0.02
+        }
         await sleep(1000)
-        await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
+        const code2 = await claimRewardsHoneygain(accessTokenHoneygain, jumpTaskProId || '')
+        if (code2 == 200) {
+          coin = coin + 0.056
+        }
+        console.log('Coin:', coin)
       } else {
         console.error('Failed to get achievement IDs for JumpTask')
       }
@@ -240,7 +179,6 @@ async function runProfile(profileId: string, axiosInstance: any, accessTokenJump
         await deleteAccountJumps(accessTokenJump, idJump, axiosInstance)
       }
     }
-    return
   } catch (err) {
     console.log(err)
   }
@@ -272,36 +210,18 @@ async function processProfile(profile: any, proxy: any) {
     httpAgent: agent,
     httpsAgent: agent
   })
-  currentProxyIndex = (currentProxyIndex + 1) % proxies.length
   currentProfileIndex = (currentProfileIndex + 1) % profiles.length
+  currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
   const profile2 = profiles[currentProfileIndex]
-  const [resultExtra] = await Promise.all([
-    runProfileExtra(profile.id),
-    runProfile(profile2.id, axiosInstance, accessTokenJumpExtra, idJumpExtra)
-  ])
-
-  console.log('Deleted account jumps for profile extra')
-  const proxyExtra = activeProxies[currentProxyIndex]
-  const agent2 = new HttpsProxyAgent(
-    `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
-  )
-  axiosExtraInstance = axios.create({
+  const proxy2 = activeProxies[currentProxyIndex]
+  const agent2 = new HttpsProxyAgent(`http://${proxy2.username}:${proxy2.password}@${proxy2.host}:${proxy2.port}`)
+  const axiosInstance2 = axios.create({
     httpAgent: agent2,
     httpsAgent: agent2
   })
-  await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
+  await Promise.all([runProfile5(profile.id, axiosInstance), runProfile5(profile2.id, axiosInstance2)])
   currentProfileIndex = (currentProfileIndex + 1) % profiles.length
   currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
-
-  if (resultExtra) {
-    const { idJump, accessToken, postIds } = resultExtra
-    idJumpExtra = idJump
-    accessTokenJumpExtra = accessToken
-    postIdsExtra = postIds
-  } else {
-    console.error('resultExtra is undefined')
-    return
-  }
 }
 
 async function run() {
@@ -315,19 +235,11 @@ async function run() {
     if (profiles.length === 0) {
       await initializeProfiles()
     }
-    const profile = profiles[currentProfileIndex]
-    isSuccess = true
-    const result = await runProfileExtra(profile.id)
-    if (result) {
-      const { idJump, accessToken, postIds } = result
-      idJumpExtra = idJump
-      accessTokenJumpExtra = accessToken
-      postIdsExtra = postIds
-    }
-    isSuccess = false
-    currentProfileIndex = (currentProfileIndex + 1) % profiles.length
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      const Postids = await getAllPostFollowId(access || '')
+      const count = Postids.length
+      console.log('count Post:', count)
       const activeProxies = await filterActiveProxies(proxies)
       if (activeProxies.length === 0) {
         console.log('No active proxies available')
@@ -339,7 +251,6 @@ async function run() {
         `Running profile:${profile.name} with proxy: ${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}`
       )
       console.log('currentIndex:', currentProfileIndex)
-      console.log(`extra: ${currentProfileIndex + 1}: ${idJumpExtra}, ${accessTokenJumpExtra},PostIds: ${postIdsExtra}`)
       await processProfile(profile, proxy)
       await sleep(3000)
     }

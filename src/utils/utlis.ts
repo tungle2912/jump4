@@ -3,7 +3,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { Browser, Page, Target } from 'puppeteer'
 import { sleep } from '~/lib/utils'
 import { filterActiveProxies, proxiesOther } from '~/services/proxy'
-
+import { promises as fs } from 'fs'
 export const isPageReady = async (page: Page): Promise<boolean> => {
   try {
     // Kiểm tra trạng thái của trang
@@ -44,73 +44,111 @@ export const loginJumptask = async (browser: Browser, jumptask: Page) => {
     await sleep(5000)
     await jumptask.waitForSelector('button[type="button"]>p.MuiTypography-body1', { timeout: 60000 })
     const element = await jumptask.$('button[type="button"]>p.MuiTypography-body1')
-    if (element) {
-      await jumptask.click('button[type="button"]>p.MuiTypography-body1')
-    }
-    console.log('click login with google successfully')
-    const newPagePromise = new Promise<Page>((resolve, reject) => {
-      const handleTargetCreated = async (target: Target) => {
-        try {
-          const newPage = await target.page()
-          if (newPage && target.url().includes('accounts.google.com')) {
-            browser.off('targetcreated', handleTargetCreated)
-            resolve(newPage)
-          }
-        } catch (err) {
-          browser.off('targetcreated', handleTargetCreated)
-          reject(err)
-        }
-      }
-      browser.on('targetcreated', handleTargetCreated)
-    })
-    const newPage = await newPagePromise
-    let newPageReady = await isPageReady(newPage)
-    let retries = 0
-    const maxRetries = 3
-    while (!newPageReady && retries < maxRetries) {
-      console.log('Trang mới chưa tải xong, tải lại...')
-      await newPage.reload()
-      await sleep(3000)
-      newPageReady = await isPageReady(newPage)
-      retries++
+    if (!element) {
+      throw new Error('Login button not found')
     }
 
-    if (!newPageReady) {
-      console.log('Trang mới vẫn chưa sẵn sàng sau các lần thử')
+    const maxRetries = 3
+    let retries = 0
+    let newPage: Page | null = null
+
+    // Retry logic for clicking and waiting for the new tab to open
+    while (retries < maxRetries && !newPage) {
+      console.log(`Attempting to click login button... try ${retries + 1}`)
+      // Listen for new tab (target created)
+      const newPagePromise = new Promise<Page>((resolve, reject) => {
+        const handleTargetCreated = async (target: Target) => {
+          try {
+            const newPage = await target.page()
+            if (newPage && target.url().includes('accounts.google.com')) {
+              browser.off('targetcreated', handleTargetCreated)
+              resolve(newPage)
+            }
+          } catch (err) {
+            browser.off('targetcreated', handleTargetCreated)
+            reject(err)
+          }
+        }
+        browser.on('targetcreated', handleTargetCreated)
+      })
+
+      // Click the button
+      await element.click()
+      console.log('Login button clicked, waiting for new tab...')
+      try {
+        // Wait for the new tab (max 10 seconds)
+        newPage = await Promise.race([newPagePromise, sleep(10000).then(() => null)])
+        if (newPage) {
+          console.log('New tab detected, proceeding with login.')
+        } else {
+          throw new Error('New tab did not open after clicking the login button.')
+        }
+      } catch (err: any) {
+        console.log(`Error: ${err.message}. Retrying...`)
+        retries++
+      }
+    }
+
+    if (!newPage) {
+      console.log('Failed to open new tab after multiple attempts.')
       return
     }
+    newPage.bringToFront()
+    // Check if the new page is ready
+    // let newPageReady = await isPageReady(newPage)
+    // retries = 0
+    // while (!newPageReady && retries < maxRetries) {
+    //   console.log('New tab not ready yet, reloading...')
+    //   await newPage.reload()
+    //   await sleep(3000)
+    //   newPageReady = await isPageReady(newPage)
+    //   retries++
+    // }
+
+    // if (!newPageReady) {
+    //   console.log('New tab still not ready after retries')
+    //   return
+    // }
+
+    // Continue with the login process in the new tab
     await newPage.waitForSelector('.yAlK0b')
-    const element1 = await newPage.$('.yAlK0b')
-    if (element1) {
-      await newPage.click('.yAlK0b')
-    }
-    await new Promise<void>((resolve) => {
-      newPage.once('close', () => {
-        console.log('Trang mới đã đóng')
-        resolve()
+    let element1 = await newPage.$('.yAlK0b')
+
+    const maxRetries2 = 3
+    let retries2 = 0
+    let tabClosed = false
+
+    while (!tabClosed && retries2 < maxRetries2) {
+      if (element1) {
+        await newPage.click('.yAlK0b')
+      }
+
+      // Wait for the tab to close within 5 seconds
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          resolve() // Resolve the promise after 5 seconds
+        }, 5000)
+
+        newPage.once('close', () => {
+          clearTimeout(timeout) // Clear timeout if tab is closed
+          console.log('New tab closed successfully')
+          tabClosed = true // Mark tab as closed
+          resolve() // Resolve the promise as the tab closed
+        })
       })
-    })
-    console.log('link thành công')
-    // await newPage.evaluate(() => {
-    //   const element = document.querySelector('.yAlK0b') as HTMLElement | null
-    //   if (element) {
-    //     element.click()
-    //   }
-    // })
-    await sleep(2000)
-    // await newPage.evaluate(() => {
-    //   const buttons = Array.from(document.querySelectorAll('div')) as HTMLDivElement[]
-    //   const addButton = buttons.find((button) => button.innerText?.trim() === 'Confirm')
-    //   if (addButton) {
-    //     addButton.click()
-    //   }
-    // })
-    console.log('Đăng nhập thành công!')
+
+      if (!tabClosed) {
+        retries2++
+        element1 = await newPage.$('.yAlK0b')
+      }
+    }
+    console.log('Login successful!')
   } catch (err: any) {
-    console.log('Đã xảy ra lỗi trong quá trình đăng nhập Jumptask')
+    console.log('An error occurred during the Jumptask login process')
     console.log(err?.message)
   }
 }
+
 export async function getIdJump(accessToken: string) {
   try {
     const [header, payload] = accessToken.split('.')
@@ -138,7 +176,7 @@ export const checkLinkTwitter = async (accessToken: string, userId: string) => {
 export const enterBonusCodeJumptask = async (accessToken: string) => {
   try {
     await axios.post(
-      'https://api.jumptask.io/referral/coupons/vovocegidada/users',
+      'https://api.jumptask.io/referral/coupons/woxuhykotyni/users',
       {},
       {
         headers: {
@@ -175,8 +213,7 @@ export const loginTwitterOnJumptask = async (browser: Browser) => {
       await linkTwitterPage.click('button[data-testid="OAuth_Consent_Button"]')
       console.log('link thành công')
     } else {
-      await sleep(1000)
-      await linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]')
+      await sleep(5000)
       await linkTwitterPage.click('div[data-testid="google_sign_in_container"]')
       console.log('clicked')
       const newPagePromise = new Promise<Page>((resolve, reject) => {
@@ -195,33 +232,12 @@ export const loginTwitterOnJumptask = async (browser: Browser) => {
       })
       try {
         const newPage = await newPagePromise
-        let newPageReady = await isPageReady(newPage)
-        let retries = 0
-        const maxRetries = 3
-        while (!newPageReady && retries < maxRetries) {
-          console.log('Trang mới chưa tải xong, tải lại...')
-          await newPage.reload()
-          await sleep(3000)
-          newPageReady = await isPageReady(newPage)
-          retries++
-        }
-
-        if (!newPageReady) {
-          console.log('Trang mới vẫn chưa sẵn sàng sau các lần thử')
-          return
-        }
-        await newPage.waitForSelector('.yAlK0b')
-        const element1 = await newPage.$('.yAlK0b')
-        if (element1) {
+        await sleep(4000)
+        const element = await newPage.$('.yAlK0b')
+        if (element) {
           await newPage.click('.yAlK0b')
+          console.log('link thành công!')
         }
-        await new Promise<void>((resolve) => {
-          newPage.once('close', () => {
-            console.log('Trang mới đã đóng')
-            resolve()
-          })
-        })
-        console.log('link thành công')
       } catch (err) {
         console.log('Đã xảy ra lỗi trong quá trình đăng nhập Twitter')
       }
@@ -235,13 +251,14 @@ export const loginTwitterOnJumptask = async (browser: Browser) => {
 export const linkTwitterOnJumptask = async (browser: Browser) => {
   try {
     const linkTwitterPage = await browser.newPage()
-    const pages = await browser.pages()
     await linkTwitterPage.goto('https://app.jumptask.io/social-accounts')
-    pages.pop()
-    for (const page of pages) {
-      await page.close()
-    }
+    //  await sleep(5000)
     await linkTwitterPage.waitForSelector('button[data-testid="link-social"]')
+    const checkCircleIcon = await linkTwitterPage.$('svg[data-testid="CheckCircleIcon"]')
+    if (checkCircleIcon) {
+      console.log('Đã tìm thấy biểu tượng CheckCircleIcon. Không thực hiện thêm hành động nào.')
+      return
+    }
     const buttons = await linkTwitterPage.$$('button[data-testid="link-social"]')
     if (buttons.length > 0) {
       await buttons[0].click()
@@ -249,11 +266,12 @@ export const linkTwitterOnJumptask = async (browser: Browser) => {
     } else {
       console.log('Không tìm thấy nút nào.')
     }
-    await sleep(5000)
+    //  await sleep(10000)
     await linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]')
+    await linkTwitterPage.$('button[data-testid="OAuth_Consent_Button"]')
     await linkTwitterPage.click('button[data-testid="OAuth_Consent_Button"]')
-    await sleep(5000)
     console.log('link thành công')
+    await sleep(5000)
   } catch (error) {
     console.log('Error in linkTwitterOnJumptask:', error)
   }
@@ -568,7 +586,7 @@ export async function registerHoneygain(email: string, axiosInstance: any): Prom
 
   return accessToken // Return the access token if successful, otherwise null
 }
-export async function addIdJump(accessToken: string, jtKey: string, confirmEmailLink?: string) {
+export async function addFirstIdJump(accessToken: string, jtKey: string) {
   const body = {
     jt_toggle: true,
     jt_key: jtKey,
@@ -583,27 +601,35 @@ export async function addIdJump(accessToken: string, jtKey: string, confirmEmail
     })
     console.log('add Id Jump:', response.data)
   } catch (error: any) {
-    const errorResponse = error.response ? error.response.data : null
-
-    if (errorResponse && errorResponse.type === 403 && errorResponse.title === 'user_email_not_confirmed') {
-      console.log('User email not confirmed. Retrying...')
-      await confirm(confirmEmailLink)
+    console.error('Error add id jump:', error.response.data)
+  }
+}
+export async function addIdJump(accessToken: string, jtKey: string, confirmEmailLink?: string) {
+  const body = {
+    jt_toggle: true,
+    jt_key: jtKey,
+    wallet: 'account_id'
+  }
+  let retryCount = 0
+  const maxRetries = 3
+  while (retryCount < maxRetries) {
+    try {
+      const response = await axios.patch('https://dashboard.honeygain.com/api/v2/settings/jt', body, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      console.log('add Id Jump:', response.data)
+      return
+    } catch (error: any) {
+      retryCount++
+      console.error(`Error add id (Attempt ${retryCount}/${maxRetries}):`, error.response.data)
       await sleep(3000)
-      try {
-        // Re-attempt the API call after handling the issue (e.g., waiting for email confirmation)
-        const retryResponse = await axios.patch('https://dashboard.honeygain.com/api/v2/settings/jt', body, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        })
-
-        console.log('Retry success: add Id Jump:', retryResponse.data)
-      } catch (retryError: any) {
-        console.error('Error during retry:', retryError.response ? retryError.response.data : retryError.message)
+      // Nếu đạt số lần thử tối đa, báo lỗi và dừng lại
+      if (retryCount >= maxRetries) {
+        throw new Error('Max retry attempts reached. Unable to confirm user registration.')
       }
-    } else {
-      console.error('Error calling JT Toggle API:', errorResponse.title ? errorResponse : error.message)
     }
   }
 }
@@ -728,13 +754,10 @@ export async function followXJumptask(accessToken: string, userId: string, postI
       return
     } catch (error: any) {
       attempts++
-      console.error(
-        `Attempt ${attempts} failed. Error following X Jump task:`,
-        error.response ? error.response.data : error.message
-      )
+      console.error(`Attempt ${attempts} failed. Error following X Jump task:`)
       if (attempts < maxRetries) {
-        console.log('Retrying in 3 seconds...')
-        await sleep(3000)
+        console.log('Retrying in 4 seconds...')
+        await sleep(4000)
       } else {
         console.error('Max retries reached. Aborting follow.')
         break
@@ -833,5 +856,24 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
 
   if (!success) {
     console.error('Failed to delete the account after trying available proxies.')
+  }
+}
+// Hàm đọc dữ liệu từ file
+export async function readFromFile(filePath: string): Promise<number | null> {
+  try {
+    const data = await fs.readFile(filePath, 'utf-8')
+    console.log('Đọc dữ liệu thành công')
+    return +data
+  } catch (error) {
+    console.error('Lỗi khi đọc file:', error)
+    return null
+  }
+}
+export async function writeToFile(filePath: string, data: number) {
+  try {
+    await fs.writeFile(filePath, data.toString(), 'utf-8')
+    console.log('Ghi vào file thành công')
+  } catch (error) {
+    console.error('Lỗi khi ghi file:', error)
   }
 }

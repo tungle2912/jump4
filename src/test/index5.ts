@@ -6,6 +6,7 @@ import { confirm, sleep } from '~/lib/utils'
 import GoLogin from '~/services/gologin'
 import { filterActiveProxies, proxies } from '~/services/proxy'
 import {
+  addFirstIdJump,
   addIdJump,
   checkLinkTwitter,
   claimRewardsHoneygain,
@@ -33,7 +34,7 @@ const access =
 const profiles: any[] = []
 let currentProfileIndex = 0
 let currentProxyIndex = 0
-const idMain = 'aacbe798-3eb4-4a94-859a-b7d8d36d07e4'
+const idMain = 'abba5980-560e-4380-ae36-5e43cbfe2ea7'
 let accessTokenJumpExtra: any = ''
 let idJumpExtra: any = ''
 let postIdsExtra: any[] = []
@@ -42,7 +43,15 @@ let isFirst: boolean = true
 let isLoginHoneygainActive = false
 let isAddIdJumpMainActive = false
 let coin = 0
-
+async function initializeProfiles() {
+  const result = await getProfles()
+  if (result.data.profiles.length === 0) {
+    console.log('No profiles available')
+    return
+  }
+  const sortedProfiles = result.data.profiles.sort((a: any, b: any) => a.name.localeCompare(b.name))
+  profiles.push(...sortedProfiles)
+}
 async function runProfileExtra(profileId: string) {
   const { launch } = await GoLogin()
   try {
@@ -176,7 +185,7 @@ async function runProfile5(profileId: string, axiosInstance: any) {
       await confirm(confirmEmailLink)
       await sleep(5000)
       if (idJump) {
-        await addIdJump(accessTokenHoneygain, idJump)
+        await addFirstIdJump(accessTokenHoneygain, idJump)
         const otp = await getCodeEmail(tokenMail)
         if (otp) {
           await confirmWithOTP(accessTokenHoneygain, otp)
@@ -320,7 +329,7 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
       await confirm(confirmEmailLink)
       await sleep(5000)
       if (idJump) {
-        await addIdJump(accessTokenHoneygain, idJump)
+        await addFirstIdJump(accessTokenHoneygain, idJump)
         const otp = await getCodeEmail(tokenMail)
         if (otp) {
           await confirmWithOTP(accessTokenHoneygain, otp)
@@ -478,7 +487,7 @@ async function runProfile3(profileId: string, axiosInstance: any, accessTokenJum
       await confirm(confirmEmailLink)
       await sleep(5000)
       if (idJump) {
-        await addIdJump(accessTokenHoneygain, idJump)
+        await addFirstIdJump(accessTokenHoneygain, idJump)
         const otp = await getCodeEmail(tokenMail)
         if (otp) {
           await confirmWithOTP(accessTokenHoneygain, otp)
@@ -545,16 +554,6 @@ async function runProfile3(profileId: string, axiosInstance: any, accessTokenJum
     console.log(err)
   }
 }
-async function initializeProfiles() {
-  const result = await getProfles()
-  if (result.data.profiles.length === 0) {
-    console.log('No profiles available')
-    return
-  }
-  const sortedProfiles = result.data.profiles.sort((a: any, b: any) => a.name.localeCompare(b.name))
-  profiles.push(...sortedProfiles)
-}
-
 async function processProfile(profile: any, proxy: any, count: number) {
   // await addProxyToProfile({
   //   profileId: profile.id,
@@ -571,13 +570,13 @@ async function processProfile(profile: any, proxy: any, count: number) {
     httpAgent: agent,
     httpsAgent: agent
   })
-  switch (count) {
-    case 5:
+  switch (true) {
+    case count >= 5:
       await runProfile5(profile.id, axiosInstance)
       currentProfileIndex = (currentProfileIndex + 1) % profiles.length
       currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       break
-    case 4:
+    case count == 4:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
           const proxyExtra = activeProxies[currentProxyIndex]
@@ -602,7 +601,7 @@ async function processProfile(profile: any, proxy: any, count: number) {
         currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       }
       break
-    case 3:
+    case count == 3:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
           const proxyExtra = activeProxies[currentProxyIndex]
@@ -629,7 +628,6 @@ async function processProfile(profile: any, proxy: any, count: number) {
       break
   }
 }
-
 async function run() {
   try {
     await adb.launch()

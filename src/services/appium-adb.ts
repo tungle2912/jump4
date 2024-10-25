@@ -59,7 +59,7 @@ class ADBService {
         return
       }
 
-      console.log('List of devices: ', this.devices)
+      // console.log('List of devices: ', this.devices)
       const emulator = this.devices[0]
       this.deviceId = emulator.udid
     } catch (err) {
