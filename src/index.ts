@@ -8,6 +8,7 @@ import { filterActiveProxies, proxies } from '~/services/proxy'
 import {
   addFirstIdJump,
   addIdJump,
+  appendToFile,
   checkLinkTwitter,
   claimRewardsHoneygain,
   confirmUserRegistration,
@@ -29,14 +30,15 @@ import {
   verifyEmail,
   writeToFile
 } from '~/utils/utlis'
-import { getProfles } from './api/gologin'
+import { addProxyToProfile, getProfles } from './api/gologin'
 import adb from './services/appium-adb'
+import envVariables from '~/constants/env-variables'
 const access =
   'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzY29wZSI6ImNyZWRzIiwic3ViIjoiOWJiNDNhMmUtYmViMC00NDA4LTg3OTgtMWFkZTA5MWJiMmI0IiwiZXhwIjoxNzMyMTA4NDMxLCJpYXQiOjE3Mjk1MTY0MzEsImp0aSI6ImYxYjE5MzE0LTVjYmUtNDAwZC04NWIwLWVhYjBiZWNkMWM0OCJ9.3FS02ptersjyGOJVSh74Vn57PnrVZoin9Ke-tTpZ7pTptKOnbJiY2DZuSaYfEb0eqwEIcnwZjZjLalyFPNpICg'
 const profiles: any[] = []
 let currentProfileIndex = 0
 let currentProxyIndex = 0
-const idMain = 'abba5980-560e-4380-ae36-5e43cbfe2ea7'
+const idMain = envVariables.JUMPTASK_ID
 let accessTokenJumpExtra: any = ''
 let idJumpExtra: any = ''
 let postIdsExtra: any[] = []
@@ -66,12 +68,22 @@ async function runProfileExtra(profileId: string) {
       defaultViewport: null,
       protocolTimeout: 60000
     })
+    browser.on('targetcreated', async (target) => {})
+
+    browser.on('disconnected', () => {
+      // Lắng nghe ngắt kết nối trình duyệt
+      console.log('Tắt trình duyệt!')
+    })
+
+    browser.on('targetdestroyed', (target) => {
+      // Lắng nghe việc đóng trang
+      if (target.type() === 'page') {
+        console.log(`Đóng trang: ${target.url()}`)
+      }
+    })
     const pages = await browser.pages()
     const jumptask = pages[0]
-    await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000,
-      waitUntil: 'networkidle2'
-    })
+    await jumptask.goto('https://app.jumptask.io/earn')
     //await jumptask.evaluate(() => window.focus())
     await jumptask.bringToFront()
     await loginJumptask(browser, jumptask)
@@ -85,15 +97,10 @@ async function runProfileExtra(profileId: string) {
     await sleep(5000)
     postIdsExtra = await getAllPostFollowId(accessTokenJumpExtra || '')
     console.log('postids extra: ', postIdsExtra)
-    const isLinkX = await checkLinkTwitter(accessTokenJumpExtra || '', idJumpExtra || '')
-    if (!isLinkX) {
-      await loginTwitterOnJumptask(browser)
-      await sleep(5000)
-    }
     await browser.close()
     return { idJumpExtra, accessTokenJumpExtra, postIdsExtra }
   } catch (err) {
-    console.error('Error in runProfileForJumpId:', err)
+    console.log('Error in runProfileForJumpId:', err)
   }
 }
 async function runProfile5(profileId: string, axiosInstance: any) {
@@ -124,10 +131,7 @@ async function runProfile5(profileId: string, axiosInstance: any) {
     })
     const pages = await browser.pages()
     const jumptask = pages[0]
-    await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000,
-      waitUntil: 'networkidle2'
-    })
+    await jumptask.goto('https://app.jumptask.io/earn')
     await jumptask.bringToFront()
     await loginJumptask(browser, jumptask)
     await sleep(5000)
@@ -250,7 +254,7 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
     const browser = await connect({
       browserWSEndpoint: goLoginBrowser?.wsEndpoint(),
       defaultViewport: null,
-      protocolTimeout: 60000
+      protocolTimeout: 120000
     })
 
     browser.on('targetcreated', async (target) => {})
@@ -268,10 +272,7 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
     })
     const pages = await browser.pages()
     const jumptask = pages[0]
-    await jumptask.goto('https://app.jumptask.io/earn', {
-      timeout: 60000,
-      waitUntil: 'networkidle2'
-    })
+    await jumptask.goto('https://app.jumptask.io/earn')
     await jumptask.bringToFront()
     await loginJumptask(browser, jumptask)
     await sleep(5000)
@@ -292,7 +293,11 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
 
       await loginJumptask(browser, newPage)
     }
-    await loginTwitterOnJumptask(browser)
+    const check = await loginTwitterOnJumptask(browser)
+    if (!check) {
+      await browser.close()
+      return
+    }
     await enterBonusCodeJumptask(accessTokenJump as string)
     await sleep(5000)
     const postIds = await getAllPostFollowId(accessTokenJump || '')
@@ -312,11 +317,6 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
       deviceId: await adb.getDeviceId(),
       email: email || ''
     })
-    const isLinkX = await checkLinkTwitter(accessTokenJump || '', idJump || '')
-    if (!isLinkX) {
-      await loginTwitterOnJumptask(browser)
-      await sleep(5000)
-    }
     await browser.close()
     isLoginHoneygainActive = false
     //  const accessTokenHoneygain = await fetchNewAccessToken(email as string, axiosInstance)
@@ -351,16 +351,9 @@ async function runProfile4(profileId: string, axiosInstance: any, accessTokenJum
       const postIdExtra = postIdsExtra.shift()
       if (postIdExtra) {
         await addIdJump(accessTokenHoneygain, idJumpExtra)
-        await sleep(2000)
+        await sleep(4000)
         console.log(`Using profile extra idJump ${idJumpExtra}`)
         await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra)
-        const postIdExtra2 = postIdsExtra.shift()
-        await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra2)
-        if (postIdsExtra.length == 1) {
-          const postIdExtra3 = postIdsExtra.shift()
-          await followXJumptask(accessTokenJumpExtra || '', idJumpExtra, postIdExtra3)
-        }
-        await sleep(3000)
       }
       while (isAddIdJumpMainActive) {
         await sleep(5000)
@@ -556,16 +549,11 @@ async function runProfile3(profileId: string, axiosInstance: any, accessTokenJum
     console.log(err)
   }
 }
-async function processProfile(profile: any, proxy: any, count: number) {
-  // await addProxyToProfile({
-  //   profileId: profile.id,
-  //   proxy: proxy
-  // })
-  const activeProxies = await filterActiveProxies(proxies)
-  if (activeProxies.length === 0) {
-    console.log('No active proxies available')
-    return
-  }
+async function processProfile(profile: any, proxy: any, count: number, activeProxies: any) {
+  await addProxyToProfile({
+    profileId: profile.id,
+    proxy: proxy
+  })
   console.log('Proxy set successfully for profile:')
   const agent = new HttpsProxyAgent(`http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`)
   const axiosInstance = axios.create({
@@ -597,7 +585,12 @@ async function processProfile(profile: any, proxy: any, count: number) {
         isFirst = false
         console.log('profile extra :')
         await runProfileExtra(profile.id)
+        const check = await checkLinkTwitter(accessTokenJumpExtra || '', idJumpExtra || '')
+        if (!check) {
+          postIdsExtra = []
+        }
         currentProfileIndex = (currentProfileIndex + 1) % profiles.length
+        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       } else {
         await runProfile4(profile.id, axiosInstance, accessTokenJumpExtra, idJumpExtra),
@@ -641,7 +634,9 @@ async function run() {
     currentProfileIndex = (await readFromFile('src/utils/currentProfileIndex.txt')) || 0
     currentProxyIndex = (await readFromFile('src/utils/currentProxyIndex.txt')) || 0
     console.log(currentProfileIndex, currentProxyIndex)
-    initializeProfiles()
+    currentProfileIndex++
+    currentProxyIndex++
+    await initializeProfiles()
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const Postids = await getAllPostFollowId(access || '')
@@ -652,8 +647,6 @@ async function run() {
         console.log('No active proxies available')
         return
       }
-      currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-      currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       const profile = profiles[currentProfileIndex]
       const proxy = activeProxies[currentProxyIndex]
       console.log(
@@ -661,7 +654,7 @@ async function run() {
       )
       console.log('currentIndex:', currentProfileIndex)
       console.log(`extra: ${currentProfileIndex + 1}: ${idJumpExtra}, ${accessTokenJumpExtra},PostIds: ${postIdsExtra}`)
-      await processProfile(profile, proxy, count)
+      await processProfile(profile, proxy, count, activeProxies)
       await sleep(3000)
     }
   } catch (err: any) {
@@ -671,5 +664,6 @@ async function run() {
 async function writeFile() {
   await writeToFile('src/utils/currentProfileIndex.txt', currentProfileIndex)
   await writeToFile('src/utils/currentProxyIndex.txt', currentProxyIndex)
+  await appendToFile('src/utils/coin.txt', coin)
 }
 run()

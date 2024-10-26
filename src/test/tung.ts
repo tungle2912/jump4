@@ -1,38 +1,73 @@
-async function main() {
-  const wdio = await import('webdriverio');
-  // Cấu hình Desired Capabilities
-  const options = {
-    port: 4723,
-    capabilities: {
-      platformName: 'Windows',
-      platformVersion: '10', // Phiên bản Windows của bạn
-      deviceName: 'WindowsPC',
-      app: 'C:\\Path\\To\\YourApp.exe', // Đường dẫn đến ứng dụng bạn muốn kiểm tra
-      automationName: 'WindowsPC',
-      noReset: true
-    }
-  }
+import * as fs from 'fs'
+function readFormattedProxies(filePath: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const resultArray: string[] = []
 
-  // Khởi tạo Appium client
-  const client = await wdio.remote(options)
+    fs.readFile(filePath, 'utf8', (err, data) => {
+      if (err) {
+        return reject(err)
+      }
 
-  // Chờ ứng dụng tải
-  await client.pause(2000) // 2 giây để ứng dụng tải
+      // Loại bỏ dấu [] ở đầu và cuối file, sau đó tách thành từng dòng
+      const lines = data.replace(/[[\]]/g, '').split(',')
 
-  // Lấy tất cả cửa sổ ứng dụng
-  const windows = await client.getWindowHandles()
-  console.log('All windows: ', windows)
+      for (let line of lines) {
+        line = line.trim().replace(/^'|'$/g, '') // Loại bỏ dấu ' ở đầu và cuối chuỗi
+        if (line) {
+          resultArray.push(line)
+        }
+      }
 
-  // Chuyển sang cửa sổ ứng dụng
-  await client.switchToWindow(windows[0])
-  console.log('Switched to app window')
+      resolve(resultArray)
+    })
+  })
+}
+function readFileAndParseProxies(filePath: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const resultArray: string[] = []
 
-  // Tìm và tương tác với các phần tử trong ứng dụng
-  const element = await client.$('button#yourButtonId') // Tìm phần tử bằng ID
-  await element.click() // Thực hiện hành động click vào button
+    fs.readFile(filePath, 'utf8', (err, data) => {
+      if (err) {
+        return reject(err)
+      }
 
-  // Đóng ứng dụng sau khi test xong
-  await client.deleteSession()
+      const lines = data.split('\n')
+
+      for (let line of lines) {
+        line = line.trim()
+        if (line) {
+          resultArray.push(line) // Để nguyên chuỗi proxy, không tách thành đối tượng
+        }
+      }
+
+      resolve(resultArray)
+    })
+  })
 }
 
-main().catch(console.error)
+const filePath: string = './src/test/kk.txt'
+readFileAndParseProxies(filePath)
+  .then((proxies) => {
+    // Chuyển đổi mỗi phần tử trong mảng thành chuỗi có dấu '
+    const formattedProxies: string[] = proxies.map((proxy) => `'${proxy}'`)
+
+    // Ghi mảng vào file, mỗi proxy trên 1 dòng
+    fs.writeFileSync('./src/test/kkk.txt', `[${formattedProxies.join(',\n')}]`)
+
+    console.log('Đã ghi mảng proxy vào file proxyArr.txt')
+  })
+  .catch((err) => {
+    console.error('Đã xảy ra lỗi:', err)
+  })
+
+// const formattedFilePath: string = './src/test/kkk.txt'
+// readFormattedProxies(formattedFilePath)
+//   .then((proxies) => {
+//     // Ghi mảng vào file, mỗi proxy trên 1 dòng mà không có dấu '
+//     fs.writeFileSync('./src/test/kk.txt', proxies.join('\n'))
+
+//     console.log("Đã ghi mảng proxy vào file kk_no_quotes.txt mà không có dấu '")
+//   })
+//   .catch((err) => {
+//     console.error('Đã xảy ra lỗi:', err)
+//   })

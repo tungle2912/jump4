@@ -176,7 +176,7 @@ export const checkLinkTwitter = async (accessToken: string, userId: string) => {
 export const enterBonusCodeJumptask = async (accessToken: string) => {
   try {
     await axios.post(
-      'https://api.jumptask.io/referral/coupons/woxuhykotyni/users',
+      'https://api.jumptask.io/referral/coupons/mysogejonive/users',
       {},
       {
         headers: {
@@ -188,66 +188,109 @@ export const enterBonusCodeJumptask = async (accessToken: string) => {
     console.error('Failed to enter bonus code:')
   }
 }
-export const loginTwitterOnJumptask = async (browser: Browser) => {
-  try {
-    const linkTwitterPage = await browser.newPage()
-    await linkTwitterPage.goto('https://app.jumptask.io/social-accounts')
-    //  await sleep(5000)
-    await linkTwitterPage.waitForSelector('button[data-testid="link-social"]')
-    const checkCircleIcon = await linkTwitterPage.$('svg[data-testid="CheckCircleIcon"]')
-    if (checkCircleIcon) {
-      console.log('Đã tìm thấy biểu tượng CheckCircleIcon. Không thực hiện thêm hành động nào.')
-      return
-    }
-    const buttons = await linkTwitterPage.$$('button[data-testid="link-social"]')
-    if (buttons.length > 0) {
-      await buttons[0].click()
-      console.log('Nhấp vào nút đầu tiên thành công!')
-    } else {
-      console.log('Không tìm thấy nút nào.')
-    }
-    //  await sleep(10000)
-    await linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]')
-    const element = await linkTwitterPage.$('button[data-testid="OAuth_Consent_Button"]')
-    if (element) {
-      await linkTwitterPage.click('button[data-testid="OAuth_Consent_Button"]')
-      console.log('link thành công')
-    } else {
-      await sleep(5000)
-      await linkTwitterPage.click('div[data-testid="google_sign_in_container"]')
-      console.log('clicked')
-      const newPagePromise = new Promise<Page>((resolve, reject) => {
-        const handleTargetCreated = async (target: Target) => {
-          try {
-            const newPage = await target.page()
-            if (newPage) {
-              resolve(newPage)
-              browser.off('targetcreated', handleTargetCreated)
+export const loginTwitterOnJumptask = async (browser: Browser): Promise<boolean> => {
+  const maxRetries = 3
+  let retries = 0
+
+  while (retries < maxRetries) {
+    try {
+      const linkTwitterPage = await browser.newPage()
+      await linkTwitterPage.goto('https://app.jumptask.io/social-accounts')
+      await linkTwitterPage.waitForSelector('button[data-testid="link-social"]', { timeout: 30000 })
+
+      const checkCircleIcon = await linkTwitterPage.$('svg[data-testid="CheckCircleIcon"]')
+      if (checkCircleIcon) {
+        console.log('Đã tìm thấy biểu tượng CheckCircleIcon. Không thực hiện thêm hành động nào.')
+        return true // Thành công, kết thúc hàm với giá trị true
+      }
+
+      const buttons = await linkTwitterPage.$$('button[data-testid="link-social"]')
+      if (buttons.length > 0) {
+        await buttons[0].click()
+        console.log('Nhấp vào nút đầu tiên thành công!')
+      } else {
+        console.log('Không tìm thấy nút nào.')
+      }
+
+      const firstElement = await Promise.race([
+        linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]', { timeout: 10000 }),
+        linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]', { timeout: 10000 })
+      ])
+
+      if (firstElement) {
+        await firstElement.click()
+        console.log('Thực hiện nhấp vào phần tử đầu tiên xuất hiện thành công!')
+
+        if (
+          await (firstElement as any).evaluate((el: any) => el.getAttribute('data-testid') === 'OAuth_Consent_Button')
+        ) {
+          console.log('Link thành công qua OAuth!')
+          return true
+        }
+
+        const newPagePromise = new Promise<Page>((resolve, reject) => {
+          const handleTargetCreated = async (target: Target) => {
+            try {
+              const newPage = await target.page()
+              if (newPage) {
+                resolve(newPage)
+                browser.off('targetcreated', handleTargetCreated)
+              }
+            } catch (error) {
+              reject(error)
             }
-          } catch (error) {
-            reject(error)
+          }
+          browser.on('targetcreated', handleTargetCreated)
+        })
+
+        const newPage = await newPagePromise
+        await newPage.bringToFront()
+        await newPage.waitForSelector('.yAlK0b')
+
+        let element1 = await newPage.$('.yAlK0b')
+        const maxRetries2 = 3
+        let retries2 = 0
+        let tabClosed = false
+
+        while (!tabClosed && retries2 < maxRetries2) {
+          if (element1) {
+            await newPage.click('.yAlK0b')
+          }
+
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => resolve(), 5000)
+            newPage.once('close', () => {
+              clearTimeout(timeout)
+              console.log('New tab closed successfully')
+              tabClosed = true
+              resolve()
+            })
+          })
+
+          if (!tabClosed) {
+            retries2++
+            element1 = await newPage.$('.yAlK0b')
           }
         }
-        browser.on('targetcreated', handleTargetCreated)
-      })
-      try {
-        const newPage = await newPagePromise
-        await sleep(4000)
-        const element = await newPage.$('.yAlK0b')
-        if (element) {
-          await newPage.click('.yAlK0b')
-          console.log('link thành công!')
-        }
-      } catch (err) {
-        console.log('Đã xảy ra lỗi trong quá trình đăng nhập Twitter')
+
+        console.log('Login successful!')
+        return true
+      } else {
+        console.log('Không tìm thấy cả hai phần tử cần thiết để đăng nhập.')
       }
-      await sleep(2000)
-      await linkTwitterOnJumptask(browser)
+    } catch (error) {
+      retries++
+      if (retries >= maxRetries) {
+        console.log(`Đã xảy ra lỗi trong quá trình đăng nhập Twitter sau ${maxRetries} lần thử.`, error)
+        return false // Trả về false khi hết số lần thử
+      }
+      console.log(`Thử lại đăng nhập Twitter lần thứ ${retries + 1}...`)
     }
-  } catch (error) {
-    console.log('Error in loginTwitterOnJumptask:', error)
   }
+
+  return false // Nếu thoát khỏi vòng lặp mà không thành công
 }
+
 export const linkTwitterOnJumptask = async (browser: Browser) => {
   try {
     const linkTwitterPage = await browser.newPage()
@@ -754,7 +797,10 @@ export async function followXJumptask(accessToken: string, userId: string, postI
       return
     } catch (error: any) {
       attempts++
-      console.error(`Attempt ${attempts} failed. Error following X Jump task:`)
+      console.error(
+        `Attempt ${attempts} failed. Error following X Jump task:`,
+        error.response ? error.response.data : error.message
+      )
       if (attempts < maxRetries) {
         console.log('Retrying in 4 seconds...')
         await sleep(4000)
@@ -794,8 +840,8 @@ export async function claimRewardsHoneygain(accessToken: string, id: string) {
       )
 
       if (attempts < maxRetries) {
-        console.log('Retrying in 2 seconds...')
-        await sleep(3000)
+        console.log('Retrying in 5 seconds...')
+        await sleep(5000)
       } else {
         console.error('Max retries reached. Aborting claim.')
         return error.response.data.code
@@ -818,20 +864,20 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
   } catch (error: any) {
     console.error('Error deleting account:', error.response ? error.response.data : error.message)
     let activeProxies = await filterActiveProxies(proxiesOther)
-    while (!success && activeProxies.length > 0) {
+    let countRetry = 0
+    const maxRetries = 7
+    while (!success && countRetry < maxRetries) {
+      countRetry++
       const currentProxy = activeProxies[Math.floor(Math.random() * activeProxies.length)] // Chọn proxy ngẫu nhiên
       console.log(`Switching to a new proxy: ${currentProxy.host}`)
-
       const agent = new HttpsProxyAgent(
         `http://${currentProxy.username}:${currentProxy.password}@${currentProxy.host}:${currentProxy.port}`
       )
-
       // Tạo axios instance mới với proxy mới
       axiosInstance = axios.create({
         httpAgent: agent,
         httpsAgent: agent
       })
-
       try {
         // Thử lại API call với proxy mới
         const urlApi = `https://api.jumptask.io/auth/users/${id}`
@@ -862,7 +908,6 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
 export async function readFromFile(filePath: string): Promise<number | null> {
   try {
     const data = await fs.readFile(filePath, 'utf-8')
-    console.log('Đọc dữ liệu thành công')
     return +data
   } catch (error) {
     console.error('Lỗi khi đọc file:', error)
@@ -872,7 +917,13 @@ export async function readFromFile(filePath: string): Promise<number | null> {
 export async function writeToFile(filePath: string, data: number) {
   try {
     await fs.writeFile(filePath, data.toString(), 'utf-8')
-    console.log('Ghi vào file thành công')
+  } catch (error) {
+    console.error('Lỗi khi ghi file:', error)
+  }
+}
+export async function appendToFile(filePath: string, data: number) {
+  try {
+    await fs.appendFile(filePath, data.toString() + '\n', 'utf-8')
   } catch (error) {
     console.error('Lỗi khi ghi file:', error)
   }

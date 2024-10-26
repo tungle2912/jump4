@@ -76,7 +76,10 @@ async function runProfile5() {
 
       await loginJumptask(browser, newPage)
     }
-    await loginTwitterOnJumptask(browser)
+    const check = await loginTwitterOnJumptask(browser)
+    if (!check) {
+      return
+    }
     await enterBonusCodeJumptask(accessTokenJump as string)
     await sleep(5000)
     const postIds = await getAllPostFollowId(accessTokenJump || '')
