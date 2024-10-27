@@ -4,6 +4,7 @@ import { Browser, Page, Target } from 'puppeteer'
 import { sleep } from '~/lib/utils'
 import { filterActiveProxies, proxiesOther } from '~/services/proxy'
 import { promises as fs } from 'fs'
+import { addProxyToProfile } from '~/api/gologin'
 export const isPageReady = async (page: Page): Promise<boolean> => {
   try {
     // Kiểm tra trạng thái của trang
@@ -188,7 +189,7 @@ export const enterBonusCodeJumptask = async (accessToken: string) => {
     console.error('Failed to enter bonus code:')
   }
 }
-export const loginTwitterOnJumptask = async (browser: Browser): Promise<boolean> => {
+export const loginTwitterOnJumptask = async (browser: Browser, profileId: string, proxy: any): Promise<boolean> => {
   const maxRetries = 3
   let retries = 0
 
@@ -211,7 +212,7 @@ export const loginTwitterOnJumptask = async (browser: Browser): Promise<boolean>
       } else {
         console.log('Không tìm thấy nút nào.')
       }
-
+      await sleep(5000)
       const firstElement = await Promise.race([
         linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]', { timeout: 10000 }),
         linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]', { timeout: 10000 })
@@ -282,6 +283,11 @@ export const loginTwitterOnJumptask = async (browser: Browser): Promise<boolean>
       retries++
       if (retries >= maxRetries) {
         console.log(`Đã xảy ra lỗi trong quá trình đăng nhập Twitter sau ${maxRetries} lần thử.`, error)
+        await addProxyToProfile({
+          profileId: profileId,
+          proxy: proxy
+        })
+        console.log('Proxy set successfully for profile:')
         return false // Trả về false khi hết số lần thử
       }
       console.log(`Thử lại đăng nhập Twitter lần thứ ${retries + 1}...`)
@@ -794,7 +800,7 @@ export async function followXJumptask(accessToken: string, userId: string, postI
       })
       console.log('Follow X Jump task:', response.data)
       await sleep(1000)
-      return
+      return true
     } catch (error: any) {
       attempts++
       console.error(
@@ -806,7 +812,7 @@ export async function followXJumptask(accessToken: string, userId: string, postI
         await sleep(4000)
       } else {
         console.error('Max retries reached. Aborting follow.')
-        break
+        return false
       }
     }
   }
