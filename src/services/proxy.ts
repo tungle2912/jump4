@@ -1,6 +1,5 @@
 import axios from 'axios'
 import { compact } from 'lodash'
-import { timeout } from 'puppeteer'
 import { ProxyProfile } from '~/@types/data'
 import { log } from '~/lib/utils'
 
