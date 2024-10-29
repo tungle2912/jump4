@@ -5,6 +5,9 @@ import { sleep } from '~/lib/utils'
 import { filterActiveProxies, proxiesOther } from '~/services/proxy'
 import { promises as fs } from 'fs'
 import { addProxyToProfile } from '~/api/gologin'
+import emulatorController from '~/controllers/emulator.controllers'
+import adb from '~/services/appium-adb'
+import envVariables from '~/constants/env-variables'
 export const isPageReady = async (page: Page): Promise<boolean> => {
   try {
     // Kiểm tra trạng thái của trang
@@ -92,9 +95,9 @@ export const loginJumptask = async (browser: Browser, jumptask: Page) => {
 
     if (!newPage) {
       console.log('Failed to open new tab after multiple attempts.')
-      return
+      return false
     }
-    newPage.bringToFront()
+    await newPage.bringToFront()
     // Check if the new page is ready
     // let newPageReady = await isPageReady(newPage)
     // retries = 0
@@ -143,10 +146,17 @@ export const loginJumptask = async (browser: Browser, jumptask: Page) => {
         element1 = await newPage.$('.yAlK0b')
       }
     }
-    console.log('Login successful!')
+    if (tabClosed) {
+      console.log('Login successful!')
+      return true
+    } else {
+      console.log('Tab did not close after retries')
+      return false
+    }
   } catch (err: any) {
     console.log('An error occurred during the Jumptask login process')
     console.log(err?.message)
+    return false
   }
 }
 
@@ -171,13 +181,14 @@ export const checkLinkTwitter = async (accessToken: string, userId: string) => {
     const twitterAccounts = response.data.data
     return twitterAccounts != null && twitterAccounts.length > 0
   } catch (error) {
-    console.error('Failed to check Twitter link:', error)
+    console.error('Failed to check Twitter link:')
   }
 }
 export const enterBonusCodeJumptask = async (accessToken: string) => {
   try {
+    const code = envVariables.REFERRAL_CODE
     await axios.post(
-      'https://api.jumptask.io/referral/coupons/mysogejonive/users',
+      `https://api.jumptask.io/referral/coupons/${code}/users `,
       {},
       {
         headers: {
@@ -197,14 +208,12 @@ export const loginTwitterOnJumptask = async (browser: Browser, profileId: string
     try {
       const linkTwitterPage = await browser.newPage()
       await linkTwitterPage.goto('https://app.jumptask.io/social-accounts')
-      await linkTwitterPage.waitForSelector('button[data-testid="link-social"]', { timeout: 30000 })
-
+      await linkTwitterPage.waitForSelector('button[data-testid="link-social"]', { timeout: 60000 })
       const checkCircleIcon = await linkTwitterPage.$('svg[data-testid="CheckCircleIcon"]')
       if (checkCircleIcon) {
         console.log('Đã tìm thấy biểu tượng CheckCircleIcon. Không thực hiện thêm hành động nào.')
         return true // Thành công, kết thúc hàm với giá trị true
       }
-
       const buttons = await linkTwitterPage.$$('button[data-testid="link-social"]')
       if (buttons.length > 0) {
         await buttons[0].click()
@@ -214,8 +223,8 @@ export const loginTwitterOnJumptask = async (browser: Browser, profileId: string
       }
       await sleep(5000)
       const firstElement = await Promise.race([
-        linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]', { timeout: 10000 }),
-        linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]', { timeout: 10000 })
+        linkTwitterPage.waitForSelector('button[data-testid="OAuth_Consent_Button"]', { timeout: 50000 }),
+        linkTwitterPage.waitForSelector('div[data-testid="google_sign_in_container"]', { timeout: 50000 })
       ])
 
       if (firstElement) {
@@ -273,9 +282,9 @@ export const loginTwitterOnJumptask = async (browser: Browser, profileId: string
             element1 = await newPage.$('.yAlK0b')
           }
         }
-
         console.log('Login successful!')
-        return true
+
+        await linkTwitterOnJumptask(browser)
       } else {
         console.log('Không tìm thấy cả hai phần tử cần thiết để đăng nhập.')
       }
@@ -291,12 +300,12 @@ export const loginTwitterOnJumptask = async (browser: Browser, profileId: string
         return false // Trả về false khi hết số lần thử
       }
       console.log(`Thử lại đăng nhập Twitter lần thứ ${retries + 1}...`)
+      await sleep(5000)
     }
   }
 
   return false // Nếu thoát khỏi vòng lặp mà không thành công
 }
-
 export const linkTwitterOnJumptask = async (browser: Browser) => {
   try {
     const linkTwitterPage = await browser.newPage()
@@ -325,7 +334,6 @@ export const linkTwitterOnJumptask = async (browser: Browser) => {
     console.log('Error in linkTwitterOnJumptask:', error)
   }
 }
-
 export async function getAchievementIdsForJumpTask(
   accesstoken: string,
   retries = 3
@@ -373,10 +381,7 @@ export async function getAllPostFollowId(accessToken: string): Promise<string[]>
       })
       const filteredOffers = response.data.data.offers
         .filter(
-          (offer: any) =>
-            offer.title.toLowerCase().includes('follow') ||
-            offer.title.toLowerCase().includes('like') ||
-            offer.title.toLowerCase().includes('repost')
+          (offer: any) => offer.title.toLowerCase().includes('follow') || offer.title.toLowerCase().includes('like')
         )
         .map((offer: any) => offer.offer_id)
 
@@ -537,34 +542,40 @@ export async function verifyEmail(token: string) {
     await new Promise((resolve) => setTimeout(resolve, 5000))
   }
 }
-export async function getCodeEmail(token: string): Promise<string | null> {
+export async function getCodeEmail(
+  token: string,
+  accessTokenHoneygain: string,
+  idJump: string
+): Promise<string | null> {
   const subjectToFind = 'Verification Code 🔑 | Honeygain'
-  await new Promise((resolve) => setTimeout(resolve, 3000))
-
+  await sleep(3000)
+  let count = 0
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const emails = await getEmails(token)
 
     if (emails && emails.length > 0) {
       const emailToVerify = await findEmailBySubject(emails, subjectToFind)
-
+      if (count == 10) {
+        await addFirstIdJump(accessTokenHoneygain, idJump)
+      }
       if (emailToVerify) {
         console.log(`Found email with subject "${subjectToFind}".`)
         const emailId = emailToVerify.id
-
         const otp = await getOTPFromEmailDetails(token, emailId)
         if (otp) {
           console.log('OTP:', otp)
           return otp
         }
       } else {
+        count++
         console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
       }
     } else {
       console.log('No emails received yet, retrying...')
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 5000))
+    await sleep(5000)
   }
 }
 export async function registerHoneygain(email: string, axiosInstance: any): Promise<string | null> {
@@ -716,7 +727,7 @@ export async function fetchNewAccessToken(email: string) {
     return null
   }
 }
-export async function unlockAchievementsHoneygain(accessToken: string) {
+export async function unlockAchievementsHoneygain(accessToken: string, email: string) {
   const maxRetries = 3
   let attempts = 0
 
@@ -743,6 +754,12 @@ export async function unlockAchievementsHoneygain(accessToken: string) {
         `Attempt ${attempts} failed. Error unlocking achievements:`,
         error.response ? error.response.data : error.message
       )
+      if (attempts == 2) {
+        await emulatorController.resetLoginHoneygain({
+          deviceId: await adb.getDeviceId(),
+          email: email || ''
+        })
+      }
       if (attempts < maxRetries) {
         console.log('Retrying in 2 seconds...')
         await sleep(2000)
@@ -932,5 +949,22 @@ export async function appendToFile(filePath: string, data: number) {
     await fs.appendFile(filePath, data.toString() + '\n', 'utf-8')
   } catch (error) {
     console.error('Lỗi khi ghi file:', error)
+  }
+}
+export async function getCoin(filePath: string): Promise<number> {
+  try {
+    const data = await fs.readFile(filePath, 'utf8')
+    const lines = data.trim().split('\n')
+    const lastLine = lines[lines.length - 1]
+    const number = Number(lastLine)
+
+    if (isNaN(number)) {
+      throw new Error('Dòng cuối không phải là một số hợp lệ')
+    }
+
+    return number
+  } catch (error: any) {
+    console.error('Lỗi khi đọc file:', error.message)
+    throw error
   }
 }
