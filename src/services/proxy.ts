@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { compact } from 'lodash'
+import { timeout } from 'puppeteer'
 import { ProxyProfile } from '~/@types/data'
 import { log } from '~/lib/utils'
 
@@ -48,19 +49,28 @@ export const isProxyActive = async (proxy: ProxyProfile) => {
   try {
     if (!proxy) return false
 
-    const res = await axios.get('http://api.myip.com', {
-      proxy: {
-        host: proxy.host,
-        port: +proxy.port,
-        auth: {
-          username: proxy.username,
-          password: proxy.password
+    const res = await axios.post<
+      [
+        {
+          proxy: string
+          ip: string
+          type: string
+          status: 'Live' | 'Die'
         }
+      ]
+    >(
+      'https://checkproxy.vip/check_proxy.php',
+      {
+        proxies: [`${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}`],
+        format: 'host:port:username:password',
+        type: 'http'
       },
-      timeout: 5000
-    })
+      {
+        timeout: 10000
+      }
+    )
     // log('IP: ', res.data)
-    return true
+    return res.data[0].status === 'Live'
   } catch (error: any) {
     //log('Check proxy: ', error?.message)
     return false
