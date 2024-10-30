@@ -5,8 +5,9 @@ import envVariables from '~/constants/env-variables'
 import emulatorController from '~/controllers/emulator.controllers'
 import { confirm, sleep } from '~/lib/utils'
 import GoLogin from '~/services/gologin'
-import { filterActiveProxies, proxies } from '~/services/proxy'
+
 import {
+  activeProxy,
   addFirstIdJump,
   addIdJump,
   appendToFile,
@@ -242,7 +243,7 @@ async function runProfile(
     //  const accessTokenHoneygain = await fetchNewAccessToken(email as string, axiosInstance)
     if (accessTokenHoneygain) {
       await confirmUserRegistration(accessTokenHoneygain)
-      const confirmEmailLink = await verifyEmail(tokenMail)
+      const confirmEmailLink = await verifyEmail(tokenMail, accessTokenHoneygain)
       await sleep(2000)
       // if (confirmEmailLink) {
       //   const page = await browser.newPage()
@@ -376,7 +377,7 @@ async function processProfile(profile: any, proxy: any, count: number, activePro
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           if (accessTokenJumpExtra && idJumpExtra) {
             await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
             accessTokenJumpExtra = null
@@ -415,7 +416,7 @@ async function processProfile(profile: any, proxy: any, count: number, activePro
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
           console.log('Deleted account jumps for profile extra')
         }
@@ -453,7 +454,7 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
         httpsAgent: agent2
       })
       currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-      currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+      currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       const profile2 = profiles[currentProfileIndex]
       await Promise.all([
         runProfile(5, profile.id, proxy, axiosInstance),
@@ -475,7 +476,7 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           if (accessTokenJumpExtra && idJumpExtra) {
             await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
             accessTokenJumpExtra = null
@@ -506,7 +507,7 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpsAgent: agent
           })
           currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-          currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           const profile2 = profiles[currentProfileIndex]
           await Promise.all([
             runProfile(4, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
@@ -534,7 +535,7 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % proxies.length
+          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
           console.log('Deleted account jumps for profile extra')
         }
@@ -560,7 +561,7 @@ async function run() {
     currentProfileIndex = (await readFromFile('src/utils/currentProfileIndex.txt')) || 0
     currentProxyIndex = (await readFromFile('src/utils/currentProxyIndex.txt')) || 0
     console.log(currentProfileIndex, currentProxyIndex)
-    const activeProxies = await filterActiveProxies(proxies)
+    let activeProxies = await activeProxy()
     await initializeProfiles()
     currentProfileIndex = (currentProfileIndex + 1) % profiles.length
     currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
@@ -570,13 +571,13 @@ async function run() {
       const count = Postids.length
       //  const count = 5
       console.log('count Post:', count)
-      const activeProxies = await filterActiveProxies(proxies)
+      activeProxies = await activeProxy()
       if (activeProxies.length === 0) {
         console.log('No active proxies available')
         return
       }
       const profile = profiles[currentProfileIndex]
-      let proxy
+      let proxy: any
       try {
         proxy = activeProxies[currentProxyIndex]
         console.log(
