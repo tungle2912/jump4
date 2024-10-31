@@ -21,7 +21,11 @@ export const clearCookies = async (profileId: string) => {
 }
 
 export const addProxyToProfile = async ({ profileId, proxy }: { profileId: string; proxy: ProxyProfile }) => {
-  return await request.patch(`/${profileId}/proxy`, proxy)
+  try {
+    return await request.patch(`/${profileId}/proxy`, proxy)
+  } catch (error: any) {
+    console.error('Error in addProxyToProfile:', error.response ? error.response.data : error.message)
+  }
 }
 
 export const deleteProxyFromProfile = async (profileId: string) => {

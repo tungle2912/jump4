@@ -6,8 +6,10 @@ import emulatorController from '~/controllers/emulator.controllers'
 import { confirm, sleep } from '~/lib/utils'
 import GoLogin from '~/services/gologin'
 
+import { Proxy } from '~/services/proxy'
 import {
   activeProxy,
+  activeProxyOther,
   addFirstIdJump,
   addIdJump,
   appendToFile,
@@ -24,6 +26,8 @@ import {
   getCodeEmail,
   getCoin,
   getIdJump,
+  isProxyActive,
+  loadProxiesFromFile,
   loginJumptask,
   loginMail,
   loginTwitterOnJumptask,
@@ -35,6 +39,7 @@ import {
 } from '~/utils/utlis'
 import { addProxyToProfile, getProfles } from './api/gologin'
 import adb from './services/appium-adb'
+import { ProxyProfile } from '~/@types/data'
 const access =
   'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJzY29wZSI6ImNyZWRzIiwic3ViIjoiOWJiNDNhMmUtYmViMC00NDA4LTg3OTgtMWFkZTA5MWJiMmI0IiwiZXhwIjoxNzMyMTA4NDMxLCJpYXQiOjE3Mjk1MTY0MzEsImp0aSI6ImYxYjE5MzE0LTVjYmUtNDAwZC04NWIwLWVhYjBiZWNkMWM0OCJ9.3FS02ptersjyGOJVSh74Vn57PnrVZoin9Ke-tTpZ7pTptKOnbJiY2DZuSaYfEb0eqwEIcnwZjZjLalyFPNpICg'
 const profiles: any[] = []
@@ -50,6 +55,8 @@ let isLoginHoneygainActive = false
 let isAddIdJumpMainActive = false
 let coin = 0
 let isFirstLoginEmulator = true
+let proxyList: ProxyProfile[] = []
+let proxyOtherList: ProxyProfile[] = []
 async function initializeProfiles() {
   const result = await getProfles()
   if (result.data.profiles.length === 0) {
@@ -71,6 +78,7 @@ async function runProfileExtra(profileId: string, proxy: any) {
       })
       goLoginBrowser = browser
     } catch (launchError) {
+      console.log('Error in launch browser:')
       await addProxyToProfile({
         profileId: profileId,
         proxy: proxy
@@ -111,6 +119,7 @@ async function runProfileExtra(profileId: string, proxy: any) {
       return
     }
     await sleep(5000)
+    const check = await loginTwitterOnJumptask(browser, profileId, proxy)
     accessTokenJumpExtra = await jumptask.evaluate(() => {
       return localStorage.getItem('JWT')
     })
@@ -121,7 +130,6 @@ async function runProfileExtra(profileId: string, proxy: any) {
     }
     idJumpExtra = await getIdJump(accessTokenJumpExtra || '')
     console.log('idJump extra:', idJumpExtra)
-    const check = await loginTwitterOnJumptask(browser, profileId, proxy)
     if (!check) {
       await browser.close()
       return
@@ -139,7 +147,7 @@ async function runProfileExtra(profileId: string, proxy: any) {
     })
     console.log('Proxy set successfully for profile')
     if (browser) {
-      browser.close()
+      await browser.close()
     }
   }
 }
@@ -201,6 +209,7 @@ async function runProfile(
       return
     }
     await sleep(5000)
+    const check = await loginTwitterOnJumptask(browser, profileId, proxy)
     const accessTokenJump = await jumptask.evaluate(() => {
       return localStorage.getItem('JWT')
     })
@@ -212,7 +221,6 @@ async function runProfile(
     const idJump = await getIdJump(accessTokenJump || '')
     console.log('idJump:', idJump)
 
-    const check = await loginTwitterOnJumptask(browser, profileId, proxy)
     if (!check) {
       await browser.close()
       return
@@ -344,11 +352,11 @@ async function runProfile(
     })
     console.log('Proxy set successfully for profile')
     if (browser) {
-      browser.close()
+      await browser.close()
     }
   }
 }
-async function processProfile(profile: any, proxy: any, count: number, activeProxies: any) {
+async function processProfile(profile: any, proxy: any, count: number) {
   // await addProxyToProfile({
   //   profileId: profile.id,
   //   proxy: proxy
@@ -363,27 +371,29 @@ async function processProfile(profile: any, proxy: any, count: number, activePro
     case count >= 5:
       await runProfile(5, profile.id, proxy, axiosInstance)
       currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-      currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       writeFile()
       break
     case count == 4:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
-          const proxyExtra = activeProxies[currentProxyIndex]
-          const agent = new HttpsProxyAgent(
-            `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
-          )
-          axiosExtraInstance = axios.create({
-            httpAgent: agent,
-            httpsAgent: agent
-          })
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
+          const proxyExtra = await getProxy(proxyList)
+          if (proxyExtra) {
+            const agent = new HttpsProxyAgent(
+              `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
+            )
+            axiosExtraInstance = axios.create({
+              httpAgent: agent,
+              httpsAgent: agent
+            })
+          } else {
+            throw new Error('Failed to get proxyExtra')
+          }
           if (accessTokenJumpExtra && idJumpExtra) {
             await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
             accessTokenJumpExtra = null
             idJumpExtra = null
+            console.log('Deleted account jumps for profile extra')
           }
-          console.log('Deleted account jumps for profile extra')
         }
         isFirst = false
         console.log('profile extra :')
@@ -396,19 +406,20 @@ async function processProfile(profile: any, proxy: any, count: number, activePro
           }
         }
         currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       } else {
         await runProfile(4, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
           (currentProfileIndex = (currentProfileIndex + 1) % profiles.length)
-        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       }
       break
     case count == 3:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
-          const proxyExtra = activeProxies[currentProxyIndex]
+          const proxyExtra = await getProxy(proxyList)
+          if (!proxyExtra) {
+            throw new Error('Failed to get proxyExtra')
+          }
           const agent = new HttpsProxyAgent(
             `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
           )
@@ -416,25 +427,34 @@ async function processProfile(profile: any, proxy: any, count: number, activePro
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
-          await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
-          console.log('Deleted account jumps for profile extra')
+          if (accessTokenJumpExtra && idJumpExtra) {
+            await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
+            accessTokenJumpExtra = null
+            idJumpExtra = null
+            console.log('Deleted account jumps for profile extra')
+          }
         }
         isFirst = false
         console.log('profile extra :')
         await runProfileExtra(profile.id, proxy)
+        if (accessTokenJumpExtra && idJumpExtra) {
+          await sleep(5000)
+          const check = await checkLinkTwitter(accessTokenJumpExtra || '', idJumpExtra || '')
+          if (!check) {
+            postIdsExtra = []
+          }
+        }
         currentProfileIndex = (currentProfileIndex + 1) % profiles.length
         writeFile()
       } else {
         await runProfile(3, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
           (currentProfileIndex = (currentProfileIndex + 1) % profiles.length)
-        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       }
       break
   }
 }
-async function processProfile2(profile: any, proxy: any, count: number, activeProxies: any) {
+async function processProfile2(profile: any, proxy: any, count: number) {
   // await addProxyToProfile({
   //   profileId: profile.id,
   //   proxy: proxy
@@ -447,28 +467,32 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
   })
   switch (true) {
     case count >= 5: {
-      const proxy2 = activeProxies[currentProxyIndex]
+      const proxy2 = await getProxy(proxyList)
+      if (!proxy2) {
+        throw new Error('Failed to get proxyExtra')
+      }
       const agent2 = new HttpsProxyAgent(`http://${proxy2.username}:${proxy2.password}@${proxy2.host}:${proxy2.port}`)
       const axiosInstance2 = axios.create({
         httpAgent: agent2,
         httpsAgent: agent2
       })
       currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-      currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       const profile2 = profiles[currentProfileIndex]
       await Promise.all([
         runProfile(5, profile.id, proxy, axiosInstance),
         runProfile(5, profile2.id, proxy2, axiosInstance2)
       ])
       currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-      currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
       writeFile()
       break
     }
     case count == 4:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
-          const proxyExtra = activeProxies[currentProxyIndex]
+          const proxyExtra = await getProxy(proxyList)
+          if (!proxyExtra) {
+            throw new Error('Failed to get proxyExtra')
+          }
           const agent = new HttpsProxyAgent(
             `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
           )
@@ -476,7 +500,6 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           if (accessTokenJumpExtra && idJumpExtra) {
             await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
             accessTokenJumpExtra = null
@@ -494,11 +517,13 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
           }
         }
         currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       } else {
         if (postIdsExtra.length % 2 == 0) {
-          const proxy2 = activeProxies[currentProxyIndex]
+          const proxy2 = await getProxy(proxyList)
+          if (!proxy2) {
+            throw new Error('Failed to get proxyExtra')
+          }
           const agent = new HttpsProxyAgent(
             `http://${proxy2.username}:${proxy2.password}@${proxy2.host}:${proxy2.port}`
           )
@@ -507,19 +532,17 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpsAgent: agent
           })
           currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           const profile2 = profiles[currentProfileIndex]
           await Promise.all([
             runProfile(4, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
             runProfile(4, profile2.id, proxy2, axiosInstance2, accessTokenJumpExtra, idJumpExtra)
           ])
           currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
+
           writeFile()
         } else {
           await runProfile(4, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
             (currentProfileIndex = (currentProfileIndex + 1) % profiles.length)
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           writeFile()
         }
       }
@@ -527,7 +550,10 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
     case count == 3:
       if (postIdsExtra.length === 0) {
         if (!isFirst) {
-          const proxyExtra = activeProxies[currentProxyIndex]
+          const proxyExtra = await getProxy(proxyList)
+          if (!proxyExtra) {
+            throw new Error('Failed to get proxyExtra')
+          }
           const agent = new HttpsProxyAgent(
             `http://${proxyExtra.username}:${proxyExtra.password}@${proxyExtra.host}:${proxyExtra.port}`
           )
@@ -535,7 +561,6 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
             httpAgent: agent,
             httpsAgent: agent
           })
-          currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
           await deleteAccountJumps(accessTokenJumpExtra, idJumpExtra, axiosExtraInstance)
           console.log('Deleted account jumps for profile extra')
         }
@@ -547,7 +572,6 @@ async function processProfile2(profile: any, proxy: any, count: number, activePr
       } else {
         await runProfile(3, profile.id, proxy, axiosInstance, accessTokenJumpExtra, idJumpExtra),
           (currentProfileIndex = (currentProfileIndex + 1) % profiles.length)
-        currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
         writeFile()
       }
       break
@@ -558,48 +582,55 @@ async function run() {
     coin = await getCoin('src/utils/coin.txt')
     console.log('Coin:', coin)
     await adb.launch()
+    await activeProxy()
+    await activeProxyOther()
+    proxyList = await loadProxiesFromFile('src/utils/proxies.txt')
+    proxyOtherList = await loadProxiesFromFile('src/utils/proxiesOther.txt')
     currentProfileIndex = (await readFromFile('src/utils/currentProfileIndex.txt')) || 0
     currentProxyIndex = (await readFromFile('src/utils/currentProxyIndex.txt')) || 0
     console.log(currentProfileIndex, currentProxyIndex)
-    let activeProxies = await activeProxy()
     await initializeProfiles()
     currentProfileIndex = (currentProfileIndex + 1) % profiles.length
-    currentProxyIndex = (currentProxyIndex + 1) % activeProxies.length
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const Postids = await getAllPostFollowId(access || '')
       const count = Postids.length
       //  const count = 5
       console.log('count Post:', count)
-      activeProxies = await activeProxy()
-      if (activeProxies.length === 0) {
-        console.log('No active proxies available')
-        return
-      }
       const profile = profiles[currentProfileIndex]
-      let proxy: any
-      try {
-        proxy = activeProxies[currentProxyIndex]
+
+      const proxy = await getProxy(proxyList)
+      if (proxy) {
         console.log(
           `Running profile:${profile.name} with proxy: ${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}`
         )
-      } catch {
-        console.log('Proxy index out of bounds. Resetting currentProxyIndex to 0.')
-        currentProxyIndex = 0
-        proxy = activeProxies[currentProxyIndex]
       }
-      console.log('currentIndex:', currentProfileIndex)
       console.log(`extra: ${currentProfileIndex + 1}: ${idJumpExtra}, ${accessTokenJumpExtra},PostIds: ${postIdsExtra}`)
-      await processProfile(profile, proxy, count, activeProxies)
+      await processProfile(profile, proxy, count)
       await sleep(3000)
     }
-  } catch (err: any) {
-    console.error('Error in run function:', err.message)
+  } catch (error) {
+    console.error('Error in runFunction:')
   }
 }
 async function writeFile() {
   await writeToFile('src/utils/currentProfileIndex.txt', currentProfileIndex)
   await writeToFile('src/utils/currentProxyIndex.txt', currentProxyIndex)
   await appendToFile('src/utils/coin.txt', coin)
+}
+export async function getProxy(proxyList: ProxyProfile[]): Promise<ProxyProfile | null> {
+  let attempts = 0
+  while (attempts < proxyList.length) {
+    const proxy = proxyList[currentProxyIndex]
+    const isActive = await isProxyActive(proxy)
+    if (isActive) {
+      currentProxyIndex = (currentProxyIndex + 1) % proxyList.length
+      return proxy
+    }
+    // Tăng currentIndex và quay về 0 nếu vượt quá độ dài proxyList
+    currentProxyIndex = (currentProxyIndex + 1) % proxyList.length
+    attempts++
+  }
+  return null // Không có proxy nào hoạt động
 }
 run()

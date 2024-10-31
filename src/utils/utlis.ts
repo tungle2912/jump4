@@ -1,13 +1,14 @@
 import axios from 'axios'
+import { promises as fs } from 'fs'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { Browser, Page, Target } from 'puppeteer'
-import { sleep } from '~/lib/utils'
-import { filterActiveProxies, proxiesOther } from '~/services/proxy'
-import { promises as fs } from 'fs'
+import { ProxyProfile } from '~/@types/data'
 import { addProxyToProfile } from '~/api/gologin'
-import emulatorController from '~/controllers/emulator.controllers'
-import adb from '~/services/appium-adb'
 import envVariables from '~/constants/env-variables'
+import emulatorController from '~/controllers/emulator.controllers'
+import { sleep } from '~/lib/utils'
+import adb from '~/services/appium-adb'
+import { checkProxiesFromFile, Proxy } from '~/services/proxy'
 export const isPageReady = async (page: Page): Promise<boolean> => {
   try {
     // Kiểm tra trạng thái của trang
@@ -143,6 +144,7 @@ export const loginJumptask = async (browser: Browser, jumptask: Page) => {
 
       if (!tabClosed) {
         retries2++
+        await sleep(5000)
         element1 = await newPage.$('.yAlK0b')
       }
     }
@@ -514,17 +516,20 @@ export async function loginMail(email: string, password: string) {
     console.error('Error logging in:', error.response ? error.response.data : error.message)
   }
 }
-export async function verifyEmail(token: string) {
+export async function verifyEmail(token: string, accessTokenHoneygain: string) {
   const subjectToFind = 'Verify your email address 📬'
   await new Promise((resolve) => setTimeout(resolve, 3000))
-
+  let count = 0
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const emails = await getEmails(token)
 
     if (emails && emails.length > 0) {
       const emailToVerify = await findEmailBySubject(emails, subjectToFind)
-
+      if (count == 15) {
+        console.log('User confirmation triggered: ')
+        await confirmUserRegistration(accessTokenHoneygain)
+      }
       if (emailToVerify) {
         console.log(`Found email with subject "${subjectToFind}".`)
         const emailId = emailToVerify.id
@@ -534,6 +539,7 @@ export async function verifyEmail(token: string) {
           return firstHref
         }
       } else {
+        count++
         console.log(`No email with subject "${subjectToFind}" found yet, retrying...`)
       }
     } else {
@@ -556,7 +562,8 @@ export async function getCodeEmail(
 
     if (emails && emails.length > 0) {
       const emailToVerify = await findEmailBySubject(emails, subjectToFind)
-      if (count == 10) {
+      if (count == 15) {
+        console.log('add id jump')
         await addFirstIdJump(accessTokenHoneygain, idJump)
       }
       if (emailToVerify) {
@@ -601,14 +608,16 @@ export async function registerHoneygain(email: string, axiosInstance: any): Prom
     console.log('User created successfully:', accessToken)
     success = true // Mark success if the request was successful
   } catch (error: any) {
-    console.error('Error creating user:', error.response ? error.response.data : error.message)
-
-    // Fetch the list of available proxies
-    let activeProxies = await filterActiveProxies(proxiesOther)
+    console.error('Error creating user:')
 
     // Retry with proxies if the first attempt failed
-    while (!success && activeProxies.length > 0) {
-      const currentProxy = activeProxies[Math.floor(Math.random() * activeProxies.length)] // Select a random proxy
+    let proxies = await loadProxiesFromFile('src/utils/proxiesOther.txt')
+    while (!success) {
+      const currentProxy = await getRandomProxy(proxies)
+      if (!currentProxy) {
+        console.error('No available proxies found.')
+        return null
+      }
       console.log(`Switching to a new proxy: ${currentProxy.host}`)
 
       const agent = new HttpsProxyAgent(
@@ -636,7 +645,7 @@ export async function registerHoneygain(email: string, axiosInstance: any): Prom
           retryError.response ? retryError.response.data : retryError.message
         )
         // Remove the failed proxy from the list
-        activeProxies = activeProxies.filter((proxy) => proxy.host !== currentProxy.host)
+        proxies = proxies.filter((proxy: any) => proxy.host !== currentProxy.host)
       }
     }
   }
@@ -886,12 +895,13 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
     success = true
   } catch (error: any) {
     console.error('Error deleting account:', error.response ? error.response.data : error.message)
-    let activeProxies = await filterActiveProxies(proxiesOther)
-    let countRetry = 0
-    const maxRetries = 7
-    while (!success && countRetry < maxRetries) {
-      countRetry++
-      const currentProxy = activeProxies[Math.floor(Math.random() * activeProxies.length)] // Chọn proxy ngẫu nhiên
+    let proxies = await loadProxiesFromFile('src/utils/proxiesOther.txt')
+    while (!success) {
+      const currentProxy = await getRandomProxy(proxies)
+      if (!currentProxy) {
+        console.error('No available proxies found.')
+        return null
+      }
       console.log(`Switching to a new proxy: ${currentProxy.host}`)
       const agent = new HttpsProxyAgent(
         `http://${currentProxy.username}:${currentProxy.password}@${currentProxy.host}:${currentProxy.port}`
@@ -918,7 +928,7 @@ export async function deleteAccountJumps(accessToken: string, id: string, axiosI
           retryError.response ? retryError.response.data : retryError.message
         )
         // Nếu không thành công, loại bỏ proxy đã thử và chọn proxy khác
-        activeProxies = activeProxies.filter((proxy) => proxy.host !== currentProxy.host)
+        proxies = proxies.filter((proxy: { host: any }) => proxy.host !== currentProxy.host)
       }
     }
   }
@@ -967,4 +977,90 @@ export async function getCoin(filePath: string): Promise<number> {
     console.error('Lỗi khi đọc file:', error.message)
     throw error
   }
+}
+export async function activeProxy() {
+  return await checkProxiesFromFile('./src/utils/proxies.txt')
+}
+export async function activeProxyOther() {
+  return await checkProxiesFromFile('./src/utils/proxiesOther.txt')
+}
+export async function isProxyActive(proxy: ProxyProfile): Promise<boolean> {
+  try {
+    const response = await axios.post(
+      'https://checkproxy.vip/check_proxy.php',
+      {
+        proxies: [`${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}`],
+        format: 'host:port:username:password',
+        type: 'http'
+      },
+      { timeout: 7000 }
+    )
+
+    return response.data.some((p: any) => p.status === 'Live')
+  } catch (error) {
+    return false
+  }
+}
+export async function loadProxiesFromFile(filePath: string): Promise<ProxyProfile[]> {
+  try {
+    const data = await fs.readFile(filePath, 'utf8')
+    const lines = data.split('\n').filter((line) => line.trim() !== '')
+
+    const proxyList: ProxyProfile[] = lines
+      .map((line) => {
+        const proxyRegex = /^(?<host>\d+\.\d+\.\d+\.\d+):(?<port>\d+):(?<username>[^:]+):(?<password>[^:]+)$/
+        const match = line.match(proxyRegex)
+        if (match && match.groups) {
+          return {
+            autoProxyRegion: '',
+            mode: 'http',
+            torProxyRegion: '',
+            host: match.groups.host,
+            port: +match.groups.port,
+            username: match.groups.username,
+            password: match.groups.password.trim() // Loại bỏ ký tự không mong muốn ở cuối
+          } as ProxyProfile
+        }
+        return null // Trả về null nếu không khớp định dạng
+      })
+      .filter((proxy): proxy is ProxyProfile => proxy !== null) // Lọc ra các proxy hợp lệ
+
+    return proxyList // Trả về danh sách proxy hợp lệ
+  } catch (error) {
+    console.error('Error reading file:', error)
+    return []
+  }
+}
+export async function getSequentialProxy(proxyList: ProxyProfile[]): Promise<ProxyProfile | null> {
+  let currentIndex = 0
+  let attempts = 0
+
+  while (attempts < proxyList.length) {
+    const proxy = proxyList[currentIndex]
+    const isActive = await isProxyActive(proxy)
+
+    if (isActive) return proxy
+
+    // Tăng currentIndex và quay về 0 nếu vượt quá độ dài proxyList
+    currentIndex = (currentIndex + 1) % proxyList.length
+    attempts++
+  }
+
+  return null // Không có proxy nào hoạt động
+}
+export async function getRandomProxy(proxyList: ProxyProfile[]): Promise<ProxyProfile | null> {
+  let attempts = 0
+
+  while (attempts < proxyList.length) {
+    // Lấy một index ngẫu nhiên từ 0 đến độ dài của proxyList
+    const randomIndex = Math.floor(Math.random() * proxyList.length)
+    const proxy = proxyList[randomIndex]
+    const isActive = await isProxyActive(proxy)
+
+    if (isActive) return proxy
+
+    attempts++
+  }
+
+  return null // Không có proxy nào hoạt động
 }
